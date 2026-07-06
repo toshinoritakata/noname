@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## このリポジトリは何か
 
-creative coding 向けライブコーディング言語(仮称・未命名)の設計ドキュメントと、その**TypeScript 実装**(コンパイラ+WebGPU ランタイム)。git リポジトリではない。ドキュメントはすべて日本語。
+creative coding 向けライブコーディング言語(仮称・未命名)の設計ドキュメントと、その**TypeScript 実装**(コンパイラ+WebGPU ランタイム)。ドキュメントはすべて日本語。
 
 ## 実装の構成とコマンド
 
