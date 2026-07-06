@@ -1,0 +1,2 @@
+== image
+overBlend(vec4(vec4(#1, #1, #1, #1).xyz, (smoothstep(px, (neg px), (length((p - vec2(sin(time), cos((time * u0(1.7)))))) - u1(0.05))) * vec4(#1, #1, #1, #1).w)), (sample[prev](worldToUv((p / u2(1.002)))) * u3(0.97)))

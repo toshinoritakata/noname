@@ -1,0 +1,151 @@
+// 画像合成・ポスト(元 stdlib.ts 1343-1460行)。
+
+import { asNum, call, timeNode, toImage, vecV, worldToUv } from "../ops.ts";
+import type { VField, VVec } from "../value.ts";
+import { bi, binIR } from "./shared.ts";
+import type { AddFn, AddVFn } from "./shared.ts";
+
+export function installPostfx(add: AddFn, addV: AddVFn): void {
+  addV(
+    "fade",
+    bi("fade", 2, (ctx, [k, x], span) => {
+      const kn = asNum(k, span);
+      const img = toImage(ctx, x, span);
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c, p, s) => {
+          const col = img.fn(c, p, s) as VVec;
+          return vecV(4, binIR(c, "*", col.ir, kn.ir, "vec4"));
+        },
+      } as VField;
+    }),
+  );
+  addV(
+    "zoom",
+    bi("zoom", 2, (ctx, [k, x], span) => {
+      const kn = asNum(k, span);
+      const img = toImage(ctx, x, span);
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c, p, s) => img.fn(c, vecV(2, binIR(c, "/", p.ir, kn.ir, "vec2")), s),
+      } as VField;
+    }),
+  );
+  addV(
+    "bloom",
+    bi("bloom", 2, (ctx, [k, x], span) => {
+      const kn = asNum(k, span);
+      const img = toImage(ctx, x, span);
+      // ダウンサンプル+ブラー多パス連鎖(ADR-0019)。以前は「フル解像度で
+      // 大半径・多方向タップ」の単一パス近似だったが、(1) 角度方向のサンプル
+      // 密度が粗く、大きな半径では滲みが花びら状に見えるエイリアシングが出る、
+      // (2) 半径をいくら広げても image パスの自己アルファ事前乗算で glow が
+      // 消える構造バグがあった(ADR-0018で応急修正)、という2つの問題があった。
+      // 実際のゲームエンジンで標準的な「明るい部分を抽出→段階的にダウン
+      // サンプル→ブラー→アップサンプルしながら加算」という多解像度合成に
+      // 作り直す。抽出(extract)だけがユーザーのコードに依存する式で、
+      // ダウンサンプル/アップサンプル自体は固定のテンプレート shader
+      // (wgsl.ts の generateBloomChain)。
+      const coord2 = ctx.arena.node({ k: "coord", t: "vec2" });
+      const p2 = vecV(2, coord2);
+      const sampled = img.fn(ctx, p2, span) as VVec;
+      const extractRoot = call(ctx, "brightPass", [sampled.ir], "vec4");
+      const id = ctx.blooms.length;
+      ctx.blooms.push({ kind: "bloom", id, extract: extractRoot, span });
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c, p, s) => {
+          const base = img.fn(c, p, s) as VVec;
+          const glow = vecV(4, c.arena.node({ k: "sample", tex: `bloom:${id}:u0`, p: worldToUv(c, p.ir), t: "vec4" }));
+          const q = binIR(c, "*", glow.ir, kn.ir, "vec4");
+          const outRgb = binIR(
+            c,
+            "+",
+            c.arena.node({ k: "swiz", a: base.ir, sel: "xyz", t: "vec3" }),
+            c.arena.node({ k: "swiz", a: q, sel: "xyz", t: "vec3" }),
+            "vec3",
+          );
+          // glow の強さ(rgb最大成分、0..1にクランプ)をアルファの下限にする
+          // (image パスの最終出力が自己アルファで事前乗算するため、アルファ0の
+          // 背景に glow を足しても持ち上げないと消えてしまう。ADR-0018)
+          const qr = c.arena.node({ k: "swiz", a: q, sel: "x", t: "f32" });
+          const qg = c.arena.node({ k: "swiz", a: q, sel: "y", t: "f32" });
+          const qb = c.arena.node({ k: "swiz", a: q, sel: "z", t: "f32" });
+          const qMax = call(c, "max", [call(c, "max", [qr, qg], "f32"), qb], "f32");
+          const glowAlpha = call(
+            c,
+            "clamp",
+            [qMax, c.arena.node({ k: "const", v: 0, t: "f32" }), c.arena.node({ k: "const", v: 1, t: "f32" })],
+            "f32",
+          );
+          const baseA = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
+          const outA = call(c, "max", [baseA, glowAlpha], "f32");
+          return vecV(4, c.arena.node({ k: "vec", parts: [outRgb, outA], t: "vec4" }));
+        },
+      } as VField;
+    }),
+  );
+  addV(
+    "chromatic",
+    bi("chromatic", 2, (ctx, [k, x], span) => {
+      const kn = asNum(k, span);
+      const img = toImage(ctx, x, span);
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c, p, s) => {
+          const one = c.arena.node({ k: "const", v: 1, t: "f32" });
+          const pr = binIR(c, "*", p.ir, binIR(c, "+", one, kn.ir, "f32"), "vec2");
+          const pb = binIR(c, "*", p.ir, binIR(c, "-", one, kn.ir, "f32"), "vec2");
+          const cr = img.fn(c, vecV(2, pr), s) as VVec;
+          const cg = img.fn(c, p, s) as VVec;
+          const cb = img.fn(c, vecV(2, pb), s) as VVec;
+          const r = c.arena.node({ k: "swiz", a: cr.ir, sel: "x", t: "f32" });
+          const g = c.arena.node({ k: "swiz", a: cg.ir, sel: "y", t: "f32" });
+          const b = c.arena.node({ k: "swiz", a: cb.ir, sel: "z", t: "f32" });
+          const a = c.arena.node({ k: "swiz", a: cg.ir, sel: "w", t: "f32" });
+          return vecV(4, c.arena.node({ k: "vec", parts: [r, g, b, a], t: "vec4" }));
+        },
+      } as VField;
+    }),
+  );
+  addV(
+    "grain",
+    bi("grain", 2, (ctx, [k, x], span) => {
+      const kn = asNum(k, span);
+      const img = toImage(ctx, x, span);
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c, p, s) => {
+          const base = img.fn(c, p, s) as VVec;
+          const t = timeNode(c);
+          const n = call(c, "grainNoise", [p.ir, t], "f32");
+          const g = binIR(c, "*", n, kn.ir, "f32");
+          const rgb = c.arena.node({ k: "swiz", a: base.ir, sel: "xyz", t: "vec3" });
+          const rgb2 = binIR(c, "+", rgb, g, "vec3");
+          const a = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
+          return vecV(4, c.arena.node({ k: "vec", parts: [rgb2, a], t: "vec4" }));
+        },
+      } as VField;
+    }),
+  );
+  addV(
+    "vignette",
+    bi("vignette", 2, (ctx, [k, x], span) => {
+      const kn = asNum(k, span);
+      const img = toImage(ctx, x, span);
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c, p, s) => {
+          const base = img.fn(c, p, s) as VVec;
+          return vecV(4, call(c, "vignetteFn", [base.ir, p.ir, kn.ir], "vec4"));
+        },
+      } as VField;
+    }),
+  );
+}

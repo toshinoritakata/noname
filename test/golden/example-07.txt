@@ -1,0 +1,6 @@
+== raymarch 0
+dist = ((length(p) - (u6(0.8) + (lag:audio.lo:0.15 * u7(0.6)))) + ((fbm3(p) * lag:audio.hi:0.05) * u5(0.4)))
+colour = shadeLambert(vec4(#0.92, #0.92, #0.9, #1), @normal, @raydir, normalize(vec3(u2(1), u3(2), u4(1))))
+eye = vec3((u9(4) * cos((time * u10(0.1)))), (u9(4) * #0.4), (u9(4) * sin((time * u10(0.1)))))
+== image
+vec4((sample[rm:0](worldToUv(p)).xyz + (sample[bloom:0:u0](worldToUv(p)) * (u8(0.3) + lag:audio.lo:0.15)).xyz), max(sample[rm:0](worldToUv(p)).w, clamp(max(max((sample[bloom:0:u0](worldToUv(p)) * (u8(0.3) + lag:audio.lo:0.15)).x, (sample[bloom:0:u0](worldToUv(p)) * (u8(0.3) + lag:audio.lo:0.15)).y), (sample[bloom:0:u0](worldToUv(p)) * (u8(0.3) + lag:audio.lo:0.15)).z), #0, #1)))

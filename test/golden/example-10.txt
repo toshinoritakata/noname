@@ -1,0 +1,6 @@
+== raymarch 0
+dist = #1000000000
+colour = vec4(#0, #0, #0, #0)
+eye = vec3((u15(6) * cos((time * u16(0.02)))), (u15(6) * #0.4), (u15(6) * sin((time * u16(0.02)))))
+== image
+overBlend(sample[rm:0](worldToUv(p)), (sample[prev](worldToUv(p)) * u17(0.9)))

@@ -1,0 +1,6 @@
+== raymarch 0
+dist = ((p.y - ffi:ffi_ca04f874(p.xz, time)) * #0.6)
+colour = fogMix(shadeLambert(vec4(#0.92, #0.92, #0.9, #1), @normal, @raydir, normalize(vec3(u1(0.4), u2(1), u3(0.5)))), vec4(#0.53, #0.8, #0.92, #1), u0(0.08), @raydist)
+eye = vec3(u5(0), u6(1.3), u7(2))
+== image
+vignetteFn(sample[rm:0](worldToUv(p)), p, u4(0.3))

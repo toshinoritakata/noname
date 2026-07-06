@@ -1,0 +1,2 @@
+== image
+vec4(vec4(#1, #1, #1, #1).xyz, (smoothstep(px, (neg px), (length(p) - (u0(0.3) + (u1(0.1) * sin(time))))) * vec4(#1, #1, #1, #1).w))
