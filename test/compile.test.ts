@@ -46,6 +46,19 @@ test("エラー時は program が null(ADR-0010 のための前提)", () => {
   assert.equal(r.program, null);
 });
 
+test("osc.f n は入力参照にコンパイルされる(ADR-0029)", () => {
+  const r = compile(`out (circle (0.3 + osc.f 0 * 0.1) |> fill white)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(r.program!.uniformLayout.inputs.includes("osc.f0"));
+});
+
+test("osc.f の範囲外(32以上)はコンパイルエラー", () => {
+  const r = compile(`out (circle (0.3 + osc.f 32 * 0.1) |> fill white)`);
+  assert.ok(r.diagnostics.some((d) => d.severity === "error" && /osc\.f/.test(d.message)));
+  assert.equal(r.program, null);
+});
+
 test("大きな scatter は WGSL の for ループになる", () => {
   const r = compile(`out (scatter 300 \\i -> circle 0.01 |> move [hash i * 2 - 1, hash (i+7) * 2 - 1])`);
   assert.ok(r.program, JSON.stringify(r.diagnostics));

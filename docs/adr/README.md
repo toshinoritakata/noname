@@ -45,6 +45,7 @@
 - [0026](0026-bloom-premultiply-before-brightpass.md) — `bloom` の抽出は alpha を rgb に事前乗算してから行う(図形の外側が誤って発光するバグの修正)
 - [0027](0027-lift-helpers-for-shape-field-metadata.md) — `liftField`/`liftDist` で Shape/Field の副チャンネル(sprite/strip2D/spriteBatches/stripBatches/state)伝播を集約する(line/bezier が bloom 等で消えるバグの根本修正)
 - [0028](0028-runtime-hotswap-hardening.md) — ランタイムのホットスワップ経路を3点補強する(スクラブの流量制御・device.lost からの自動再初期化・パイプラインキャッシュの LRU 上限)
+- [0029](0029-osc-input-via-bridge-helper.md) — OSC 入力を汎用ブリッジヘルパー(Rust)経由で追加する(フルネイティブ書き直しの代替として、OS統合が要る部分だけを外部ヘルパーに切り出すパターンを一般化)
 
 ## 未決(ADR 化待ち)
 

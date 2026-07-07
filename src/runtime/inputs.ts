@@ -302,3 +302,39 @@ export function makeTuioAdapter(url = "ws://127.0.0.1:3333"): InputAdapter {
     },
   };
 }
+
+// ---- OSC アダプタ(ADR-0029: bridge/ の Rust ヘルパー経由) -----------------------
+
+/** OSC アドレス末尾の数字を固定バンクのスロット番号とみなす(MIDI CC と同じ発想)。
+ * ブリッジ(`bridge/`)がスロット抽出済みの32要素配列を送ってくるので、ここでは
+ * そのままスカラー入力 `osc.f0`..`osc.f31` に反映するだけ */
+export function makeOscAdapter(url = "ws://127.0.0.1:3334"): InputAdapter {
+  const OSC_SLOTS = 32;
+  const values = new Float32Array(OSC_SLOTS);
+  let ws: WebSocket | null = null;
+
+  return {
+    name: "osc",
+    schema: {
+      scalars: Array.from({ length: OSC_SLOTS }, (_, i) => ({ name: `osc.f${i}` })),
+    },
+    start() {
+      try {
+        ws = new WebSocket(url);
+        ws.onmessage = (ev) => {
+          try {
+            const snapshot = JSON.parse(String(ev.data)) as number[];
+            for (let i = 0; i < OSC_SLOTS && i < snapshot.length; i++) values[i] = snapshot[i];
+          } catch {
+            /* 形式外のメッセージは無視 */
+          }
+        };
+      } catch {
+        /* ブリッジなし。全スロット0のまま */
+      }
+    },
+    writeFrame(vals) {
+      for (let i = 0; i < OSC_SLOTS; i++) vals.set(`osc.f${i}`, values[i]);
+    },
+  };
+}

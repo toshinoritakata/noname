@@ -7,7 +7,7 @@
 import { formatDiagnostic } from "./compiler/diag.ts";
 import { EXAMPLES } from "./examples.ts";
 import { initGPU } from "./runtime/gpu.ts";
-import { makeTuioAdapter } from "./runtime/inputs.ts";
+import { makeOscAdapter, makeTuioAdapter } from "./runtime/inputs.ts";
 import { Renderer } from "./runtime/renderer.ts";
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -46,6 +46,7 @@ async function boot(): Promise<void> {
     const gpu = await initGPU(canvas);
     renderer = new Renderer(gpu);
     renderer.inputs.registerAdapter(makeTuioAdapter());
+    renderer.inputs.registerAdapter(makeOscAdapter());
     renderer.inputs.onAudioState = setStatus;
     renderer.onFps = (fps) => {
       fpsEl.textContent = `${fps.toFixed(0)} fps`;

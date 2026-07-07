@@ -1,6 +1,6 @@
 // 入力(ADR-0012: スカラー uniform とエンティティ表)。元 stdlib.ts 1666-1742行。
 
-import { asNum, inputNum, num, staticNum, vecV } from "../ops.ts";
+import { asNum, fail, inputNum, num, staticNum, vecV } from "../ops.ts";
 import { bi, binIR, rec } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 
@@ -56,6 +56,18 @@ export function installInputs(add: AddFn, addV: AddVFn): void {
         bi("cc", 1, (c, [n], s) => {
           const idx = Math.round(staticNum(n, "MIDI CC 番号", s));
           return inputNum(c, `midi.cc${idx}`);
+        }),
+      ],
+    ]),
+  );
+  add("osc", () =>
+    rec([
+      [
+        "f",
+        bi("f", 1, (c, [n], s) => {
+          const idx = Math.round(staticNum(n, "OSC スロット番号", s));
+          if (idx < 0 || idx > 31) fail(`osc.f の番号は 0〜31 です(${idx})。ADR-0029: 中継ヘルパーは32スロット固定のバンクとして OSC アドレス末尾の数字を割り当てる`, s);
+          return inputNum(c, `osc.f${idx}`);
         }),
       ],
     ]),

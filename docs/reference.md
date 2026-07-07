@@ -274,6 +274,7 @@ Cam, Dur(時間リテラルの型)
 | `mouse.x` / `.y` / `.pos` / `.down` | `Float`/`Vec2`/`Float` | マウス位置(ワールド座標)・ボタン押下 |
 | `midi.cc n` | `Float -> Float` | MIDI CC番号 `n` の値(0..1) |
 | `tuio.cursor i` | `Float -> {pos,angle,vel,alive,age}` | TUIOカーソル(要WebSocket中継、implementation.md 5.3.1) |
+| `osc.f n` | `Float -> Float` | 汎用OSC(TouchOSC/Lemur等)、固定32スロットのバンク(`n` は0〜31、要 `bridge/` の中継ヘルパー、ADR-0029) |
 | `entropy` | `Float` | 毎フレーム更新される真の乱数(0..1、非決定的)。決定的な `hash` とは対照的(ADR-0021) |
 
 ### 4.13 色定数
