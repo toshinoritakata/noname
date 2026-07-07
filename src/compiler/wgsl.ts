@@ -1301,23 +1301,42 @@ fn fs_main(in: SpriteVOut) -> @location(0) vec4f {
     }
   }
 
-  // ---- Bloom パス連鎖(ダウンサンプル+ブラー、ADR-0019・ADR-0020) ----
-  // 各 bloom() 呼び出しにつき extract(半解像度、ユーザーの式に依存) →
-  // down1..downN(1/4, 1/8, ..., 固定のボックスフィルタで段階的に縮小) →
-  // upN-1..up0(小さい方をbilinearアップサンプル+同解像度のスキップ接続を
-  // 加算しながら段階的に拡大、up0=FINALを image パスがサンプルする)という
-  // 連鎖にする。段数(BLOOM_LEVELS)を増やすほど実効ブラー半径が広がる
-  // (ユーザーから「もっと広く発光させたい」との要望を受け、ADR-0019の2段から
-  // 4段に拡張。段数を増やしても各段は解像度が下がっていくので計算コストの
-  // 増分は小さい)。ダウンサンプル/アップサンプル自体はユーザーコードに依存
-  // しない固定 shader なので Codegen の IR emit を経由しない
-  const BLOOM_LEVELS = 6;
+  // ---- Bloom パス連鎖(ダウンサンプル+ブラー、ADR-0019・ADR-0020・ADR-0025) ----
+  // 各 bloom() 呼び出しにつき native(フル解像度、ユーザーの式に依存) →
+  // e(1/2、native からの固定ボックスフィルタ)→ down1..downN(1/4, 1/8, ...、
+  // 同じ固定ボックスフィルタで段階的に縮小) → upN-1..up0(小さい方を
+  // bilinearアップサンプル+同解像度のスキップ接続を加算しながら段階的に
+  // 拡大、up0=FINALを image パスがサンプルする)という連鎖にする。
+  // native → e の1段を追加したのは ADR-0025: 以前は e をユーザーの式から
+  // 直接「半解像度」で評価していたため、シーン側のアンチエイリアス
+  // (smoothstep の px)が前提とするネイティブ解像度と、実際のサンプリング
+  // 密度がずれ、規則的な繰り返し構造(例: grid の上の小さな box)がモアレを
+  // 起こしていた。ユーザーの式はネイティブ解像度で一度だけ評価し、そこから
+  // 先は全て検証済みのボックスフィルタでのダウンサンプルに統一する
+  // 段数(bloom() 呼び出しごとの b.levels)を増やすほど実効ブラー半径が
+  // 広がる。以前は全呼び出し共通の固定6段だったが、シーンのスケールに対して
+  // 段数が合わないと(例: 密なグリッドの上に大きな固定半径)、bloomの一番粗い
+  // ミップの解像度がシーンの繰り返し構造と一致してモアレ状に見える問題があった。
+  // `bloom k x` の `k`(静的に決まる場合)から適応的に決める(ADR-0024。
+  // k が大きい=強く光らせたいほど段数を増やす)。段数を増やしても各段は解像度が
+  // 下がっていくので計算コストの増分は小さい。ダウンサンプル/アップサンプル
+  // 自体はユーザーコードに依存しない固定 shader なので Codegen の IR emit を
+  // 経由しない
   for (const b of blooms) {
+    const BLOOM_LEVELS = b.levels;
+    const nativeKey = `bloom:${b.id}:n`;
     const eKey = `bloom:${b.id}:e`;
     const downKey = (i: number) => `bloom:${b.id}:d${i}`;
     const upKey = (i: number) => (i === 0 ? `bloom:${b.id}:u0` : `bloom:${b.id}:u${i}`);
 
-    // extract: 半解像度、ユーザーの式(brightPass 済み)を評価
+    // native: フル解像度、ユーザーの式(brightPass 済み)を評価。
+    // 以前はここを直接「半解像度」で評価していたが、シーン側のアンチエイリアス
+    // (smoothstep の px)はネイティブ解像度を前提に設計されている。半解像度の
+    // 規則的な格子で直接点サンプリングすると、格子状に並んだ小さなハイライト
+    // (例: grid の上の小さな box)がその格子と干渉してモアレになる問題が
+    // あった。ここをネイティブ解像度で評価すれば、この後は below の
+    // downsample()(実績のある2x2ボックスフィルタ)だけで畳み込めるので、
+    // 新たなエイリアシングを持ち込まずに済む
     {
       const cg = new Codegen(arena, layout, inputIndex);
       cg.lib("uvToWorld");
@@ -1327,7 +1346,7 @@ fn fs_main(in: SpriteVOut) -> @location(0) vec4f {
       const out = cg.emit(b.extract, scope);
       const fs = `@fragment
 fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-  let res = max(vec2f(1.0), floor(U.header.xy * 0.5));
+  let res = max(vec2f(1.0), U.header.xy);
   let P = uvToWorld(pos.xy / res);
 ${scope.lines.join("\n")}
   return ${out};
@@ -1339,9 +1358,9 @@ ${scope.lines.join("\n")}
         targets: 1,
         textures: cg.usedTex,
         bloomId: b.id,
-        bloomOutKey: eKey,
-        bloomResDivisor: 2,
-        hash: fnv1a("bloom-e:" + b.id + ":" + arena.structuralHash([b.extract]) + ":" + inputs.join(",")),
+        bloomOutKey: nativeKey,
+        bloomResDivisor: 1,
+        hash: fnv1a("bloom-n:" + b.id + ":" + arena.structuralHash([b.extract]) + ":" + inputs.join(",")),
         lineSpans: [],
       });
     }
@@ -1377,7 +1396,8 @@ fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
         lineSpans: [],
       });
     };
-    // ダウンサンプル連鎖: e(1/2) → d1(1/4) → d2(1/8) → ... → dN(1/2^(N+1))
+    // ダウンサンプル連鎖: native(1/1) → e(1/2) → d1(1/4) → d2(1/8) → ... → dN(1/2^(N+1))
+    downsample(nativeKey, eKey, 2);
     for (let i = 1; i <= BLOOM_LEVELS; i++) {
       const srcKey = i === 1 ? eKey : downKey(i - 1);
       downsample(srcKey, downKey(i), 2 ** (i + 1));

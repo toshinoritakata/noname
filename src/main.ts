@@ -23,6 +23,7 @@ async function boot(): Promise<void> {
   const statusEl = $("status");
   const canvas = $<HTMLCanvasElement>("stage") as unknown as HTMLCanvasElement;
   const picker = $<HTMLSelectElement>("example-picker");
+  const fpsEl = $("fps");
 
   const setStatus = (s: string): void => {
     statusEl.textContent = s;
@@ -48,6 +49,9 @@ async function boot(): Promise<void> {
   }
   renderer.inputs.registerAdapter(makeTuioAdapter());
   renderer.inputs.onAudioState = setStatus;
+  renderer.onFps = (fps) => {
+    fpsEl.textContent = `${fps.toFixed(0)} fps`;
+  };
   boot.classList.add("ready");
   boot.textContent = "ready";
 

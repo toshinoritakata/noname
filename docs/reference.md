@@ -163,7 +163,7 @@ Cam, Dur(時間リテラルの型)
 
 | 関数 | シグネチャ | 説明 |
 |---|---|---|
-| `a <+> b` | 演算子 | min-union(2図形をそのまま合体)。大きな N の `scatter`/`grid` は自動でループ化(ADR-0014) |
+| `a <+> b` | 演算子 | min-union(2図形をそのまま合体)。大きな N の `scatter` は自動でループ化(ADR-0014)、`grid` は O(1) 直接索引(ADR-0022) |
 | `cut tool base` | `Shape -> Shape -> Shape` | `base` から `tool` をくり抜く |
 | `inter a b` | `Shape -> Shape -> Shape` | 交差 |
 | `blendAll k list` | `Float -> [Shape] -> Shape` | smooth union(スムーズブレンド)で畳み込む。`range n |> map f` で N>24 のとき自動でWGSLループに変換(ADR-0017) |
@@ -191,7 +191,7 @@ Cam, Dur(時間リテラルの型)
 | `a <over> b` | 演算子 | アルファ合成(`a` を `b` の上に重ねる) |
 | `fade k x` | `Float -> Image -> Image` | 全体を `k` 倍(暗くする/トレイルのフェード) |
 | `zoom k x` | `Float -> Image -> Image` | 拡大(`k>1` で拡大) |
-| `bloom k x` | `Float -> Image -> Image` | 明るい部分をにじませる |
+| `bloom k x` | `Float -> Image -> Image` | 明るい部分をにじませる。ダウンサンプル段数(滲みの実効半径)は `k` の静的な値から適応的に決まる(`k` が大きいほど段数が増える。`k` が動的な式で静的に決まらない場合は既定の段数にフォールバック。ADR-0024) |
 | `chromatic k x` | `Float -> Image -> Image` | 色収差 |
 | `grain k x` | `Float -> Image -> Image` | フィルムグレイン(時間で変化するノイズ) |
 | `vignette k x` | `Float -> Image -> Image` | 周辺減光 |
@@ -205,7 +205,7 @@ Cam, Dur(時間リテラルの型)
 | `fbm` | `Field d Float` | フラクタルブラウン運動(オクターブ5) |
 | `fbm2` / `fbm3` | `Field2 Float` / `Field3 Float` | 次元固定版 |
 | `curl` | `Field d Vec2` | カールノイズ(渦状のベクトル場) |
-| `hash i` | `Float -> Float` | 決定的な擬似乱数(0..1) |
+| `hash i` | `Float -> Float` | 決定的な擬似乱数(0..1)。真の乱数は `entropy`(4.12)参照 |
 | `hash2 i` | `Float -> Vec2` | 2成分版 |
 | `onSphere uv` | `Vec2 -> Vec3` | 球面上の一様分布点(`uv` は2つの乱数) |
 
@@ -251,7 +251,7 @@ Cam, Dur(時間リテラルの型)
 |---|---|---|
 | `range n` | `Float -> [Float]` | `[0, 1, ..., n-1]` |
 | `map f xs` | `(a->b) -> [a] -> [b]` | 写像 |
-| `grid dims f` | `[Float,Float] -> (Float->Shape2) -> Shape2` | 2Dグリッド。N>64 は自動でWGSLループ化 |
+| `grid dims f` | `[Float,Float] -> (Float->Shape2) -> Shape2` | 2Dグリッド。N>64 でもループ化せず、クエリ点からセル添字を直接計算するO(1)評価(ADR-0022。前提: 各セルの図形は自セルの外にはみ出さない) |
 | `scatter n f` | `Float -> (Float->Shape) -> Shape` | `n` 個の個体生成。N>64 は自動でループ化。`point`/`line`/`bezier` チェーンは instanced 描画へ切り替わる(ADR-0014/0016) |
 
 `n`(要素数)は**静的に決まる必要がある**(implementation.md 3.2-2)。数値リテラルか
@@ -274,6 +274,7 @@ Cam, Dur(時間リテラルの型)
 | `mouse.x` / `.y` / `.pos` / `.down` | `Float`/`Vec2`/`Float` | マウス位置(ワールド座標)・ボタン押下 |
 | `midi.cc n` | `Float -> Float` | MIDI CC番号 `n` の値(0..1) |
 | `tuio.cursor i` | `Float -> {pos,angle,vel,alive,age}` | TUIOカーソル(要WebSocket中継、implementation.md 5.3.1) |
+| `entropy` | `Float` | 毎フレーム更新される真の乱数(0..1、非決定的)。決定的な `hash` とは対照的(ADR-0021) |
 
 ### 4.13 色定数
 
@@ -329,8 +330,10 @@ name = wgsl (型注釈) """
 
 ## 7. パフォーマンス上の注意(実装上の既知の崖)
 
-- `scatter`/`grid`/`blendAll` は大きな N で自動的にWGSLループ化されるため、
-  N=数千〜数万でも描画コストがほぼ一定になる(ADR-0014/0017)
+- `scatter`/`blendAll` は大きな N で自動的にWGSLループ化されるため、
+  N=数千〜数万でも描画コストがほぼ一定になる(ADR-0014/0017)。
+  `grid` はさらに進んでループすら使わず、クエリ点から直接セルを
+  求める O(1) 評価になっている(ADR-0022)
 - `line`/`bezier` は2Dなら三角形ストリップで直接ラスタライズされる(march不要、
   ADR-0016)。3Dはまだ通常のSDFパスのみ
 - `range n |> map f |> blendAll k` のループ化しきい値は N>24。それ以下は

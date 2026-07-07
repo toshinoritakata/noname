@@ -34,6 +34,9 @@ export class Renderer {
   private blendBuf: GPUBuffer;
   private compiler = new CompilerClient();
   onStatus: ((s: string) => void) | null = null;
+  onFps: ((fps: number) => void) | null = null;
+  private fpsFrames = 0;
+  private fpsWindowStart = 0;
 
   constructor(gpu: Gpu) {
     this.gpu = gpu;
@@ -139,6 +142,7 @@ export class Renderer {
     const { device, canvas, context } = this.gpu;
     this.clock.tick(nowMs);
     this.inputs.frame(this.clock.dt, device.queue);
+    this.tickFps(nowMs);
     if (!this.active) return;
 
     // キャンバスサイズ追従
@@ -213,6 +217,18 @@ export class Renderer {
 
     device.queue.submit([encoder.finish()]);
     if (needsPrev) this.registry.swapPrev();
+  }
+
+  /** 直近1秒間のフレーム数から FPS を算出し、1秒に1回だけ onFps へ通知する */
+  private tickFps(nowMs: number): void {
+    if (this.fpsWindowStart === 0) this.fpsWindowStart = nowMs;
+    this.fpsFrames++;
+    const elapsed = nowMs - this.fpsWindowStart;
+    if (elapsed >= 1000) {
+      this.onFps?.((this.fpsFrames * 1000) / elapsed);
+      this.fpsFrames = 0;
+      this.fpsWindowStart = nowMs;
+    }
   }
 
   private ensureBlendPipelines(): void {

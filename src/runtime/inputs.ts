@@ -190,6 +190,7 @@ export class InputEngine {
     this.values.set("mouse.x", this.mouseX);
     this.values.set("mouse.y", this.mouseY);
     this.values.set("mouse.down", this.mouseDown);
+    this.values.set("entropy", Math.random()); // 真の乱数は入力として注入し、作品関数自体は純粋に保つ(ADR-0021)
 
     if (this.analyser && this.fftBins) {
       this.analyser.getFloatFrequencyData(this.fftBins as Float32Array<ArrayBuffer>);

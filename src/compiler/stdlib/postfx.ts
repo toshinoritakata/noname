@@ -37,6 +37,15 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
     "bloom",
     bi("bloom", 2, (ctx, [k, x], span) => {
       const kn = asNum(k, span);
+      // 段数(ダウンサンプルの深さ)はレンダーパス数を決めるコンパイル時定数
+      // なので、k の値そのものではなく k の**静的な値が分かる場合はそれ**から
+      // 適応的に決める(ADR-0024、ADR-0023 の手動指定版を撤回)。k が大きい
+      // ほど「強く光らせたい」意図とみなし、段数を増やして実効半径を広げる。
+      // k が `audio.lo` 等の動的な入力を含む式(例: `0.3 + bass`)だと定数畳み込み
+      // (ops.ts の foldConst)が効かず静的値は取れないので、その場合は中庸の
+      // 既定段数にフォールバックする
+      const kStatic = kn.sval ?? 1;
+      const levels = Math.max(2, Math.min(8, Math.round(3 + kStatic * 3)));
       const img = toImage(ctx, x, span);
       // ダウンサンプル+ブラー多パス連鎖(ADR-0019)。以前は「フル解像度で
       // 大半径・多方向タップ」の単一パス近似だったが、(1) 角度方向のサンプル
@@ -51,9 +60,19 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
       const coord2 = ctx.arena.node({ k: "coord", t: "vec2" });
       const p2 = vecV(2, coord2);
       const sampled = img.fn(ctx, p2, span) as VVec;
-      const extractRoot = call(ctx, "brightPass", [sampled.ir], "vec4");
+      // shape の colour() は dist/alpha を見ずに「その図形の色」を空間全域で
+      // 返す(可視・不可視の判定は別チャンネルの alpha が担う、ADR-0002)。
+      // brightPass は c.rgb だけを見て c.a を無視するので、そのまま渡すと
+      // 図形の外側(alpha=0の透明な領域)でも同じ色が明るいとみなされ、
+      // 画面全体が図形の色でうっすら光る(ADR-0026)。alpha を rgb に
+      // 事前乗算してから渡し、不可視の領域は確実に真っ黒として扱う
+      const sRgb = ctx.arena.node({ k: "swiz", a: sampled.ir, sel: "xyz", t: "vec3" });
+      const sAlpha = ctx.arena.node({ k: "swiz", a: sampled.ir, sel: "w", t: "f32" });
+      const premultRgb = binIR(ctx, "*", sRgb, sAlpha, "vec3");
+      const premultiplied = ctx.arena.node({ k: "vec", parts: [premultRgb, sAlpha], t: "vec4" });
+      const extractRoot = call(ctx, "brightPass", [premultiplied], "vec4");
       const id = ctx.blooms.length;
-      ctx.blooms.push({ kind: "bloom", id, extract: extractRoot, span });
+      ctx.blooms.push({ kind: "bloom", id, extract: extractRoot, levels, span });
       return {
         v: "field",
         dim: 2,

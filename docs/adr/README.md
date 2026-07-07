@@ -37,6 +37,12 @@
 - [0018](0018-bloom-alpha-premultiply-fix.md) — bloom は glow のあるところでアルファも持ち上げる(image パスの自己アルファ事前乗算で glow が背景に一切滲まなかったバグの修正)
 - [0019](0019-bloom-downsample-blur-chain.md) — bloom はダウンサンプル+ブラーの多パス連鎖にする(単一パス多方向タップ近似の花びら状エイリアシングを解消)
 - [0020](0020-reinhard-tonemap.md) — 最終合成に輝度ベースのReinhardトーンマッピングを挟む(HDR超過値の唐突な白飛びを緩和)
+- [0021](0021-entropy-input-for-true-randomness.md) — 真の乱数は `entropy` スカラー入力として注入し、作品関数の純粋性を保つ
+- [0022](0022-grid-o1-direct-index.md) — `grid` の大 N はループ化せず、クエリ点から直接セルを求める O(1) 評価にする
+- [0023](0023-bloom-radius-parameter.md) — (撤回・[0024](0024-bloom-radius-adaptive-from-k.md)に差し替え) `bloom` にコンパイル時定数の半径パラメータを追加する案
+- [0024](0024-bloom-radius-adaptive-from-k.md) — `bloom` の半径(ダウンサンプル段数)は独立引数にせず、`k` の静的な値から適応的に決める
+- [0025](0025-bloom-native-res-extract.md) — `bloom` の抽出はネイティブ解像度で評価してからボックスフィルタで畳み込む(半解像度での直接評価によるモアレの根本修正)
+- [0026](0026-bloom-premultiply-before-brightpass.md) — `bloom` の抽出は alpha を rgb に事前乗算してから行う(図形の外側が誤って発光するバグの修正)
 
 ## 未決(ADR 化待ち)
 

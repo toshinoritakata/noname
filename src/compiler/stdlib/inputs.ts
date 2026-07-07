@@ -30,6 +30,7 @@ export function installInputs(add: AddFn, addV: AddVFn): void {
       return num(c.arena.node({ k: "swiz", a: texel, sel: "x", t: "f32" }));
     }),
   );
+  add("entropy", (ctx) => inputNum(ctx, "entropy"));
   add("mouse", (ctx) =>
     rec([
       ["x", inputNum(ctx, "mouse.x")],

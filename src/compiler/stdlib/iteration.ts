@@ -255,37 +255,41 @@ function gridBuiltin(): VBuiltin {
       }
       return foldUnion(ctx, cells, span);
     }
-    // 大きなグリッドはループ化(セル境界の min では正しく局所化できないため、
-    // セル座標を repeat で畳んでから索引を計算する)
-    return loopShape(
-      ctx,
-      total,
-      (i) => {
-        const ix = mathApply(ctx, "fmod", [i, constF(ctx, nx)], span);
-        const iy = mathApply(ctx, "floor", [binValue(ctx, "/", i, constF(ctx, nx), span)], span);
-        const cx = binValue(ctx, "-", binValue(ctx, "*", constF(ctx, cellW), binValue(ctx, "+", ix, constF(ctx, 0.5), span), span), constF(ctx, 1), span);
-        const cy = binValue(ctx, "-", binValue(ctx, "*", constF(ctx, cellH), binValue(ctx, "+", iy, constF(ctx, 0.5), span), span), constF(ctx, 1), span);
-        const sh = toShape(ctx, ctx.apply(ctx, f, i, span), span);
-        const centre = { cx: asNum(cx, span), cy: asNum(cy, span) };
-        const scale = constF(ctx, cell);
-        const inv = constF(ctx, 1 / cell);
-        return {
-          v: "shape",
-          dim: 2,
-          dist: (c, p, s) => {
-            const cv = c.arena.node({ k: "vec", parts: [centre.cx.ir, centre.cy.ir], t: "vec2" });
-            const q = binIR(c, "*", binIR(c, "-", p.ir, cv, "vec2"), inv.ir, "vec2");
-            return num(binIR(c, "*", sh.dist(c, vecV(2, q), s).ir, scale.ir, "f32"));
-          },
-          colour: (c, p, s) => {
-            const cv = c.arena.node({ k: "vec", parts: [centre.cx.ir, centre.cy.ir], t: "vec2" });
-            const q = binIR(c, "*", binIR(c, "-", p.ir, cv, "vec2"), inv.ir, "vec2");
-            return sh.colour(c, vecV(2, q), s);
-          },
-        } as VShape;
+    // 大きなグリッドは軸整列した固定タイルなので、min ループで全セルを比較する
+    // 必要がない。クエリ点 p から直接「属するセル」の添字を計算し(iq の
+    // ドメイン反復と同じ考え方)、そのセルだけを評価する。O(n) → O(1)
+    // (前提: 各セルの図形は自セルの外にはみ出さない。はみ出す図形を並べたい
+    // 場合は scatter を使う)
+    const scale = constF(ctx, cell);
+    const inv = constF(ctx, 1 / cell);
+    const cellAt = (c: Ctx, p: VVec, s: Span): { sh: VShape; cv: NodeId } => {
+      const px = num(c.arena.node({ k: "swiz", a: p.ir, sel: "x", t: "f32" }));
+      const py = num(c.arena.node({ k: "swiz", a: p.ir, sel: "y", t: "f32" }));
+      const ixRaw = mathApply(c, "floor", [binValue(c, "/", binValue(c, "+", px, constF(c, 1), s), constF(c, cellW), s)], s);
+      const iyRaw = mathApply(c, "floor", [binValue(c, "/", binValue(c, "+", py, constF(c, 1), s), constF(c, cellH), s)], s);
+      const ix = mathApply(c, "clamp", [ixRaw, constF(c, 0), constF(c, nx - 1)], s);
+      const iy = mathApply(c, "clamp", [iyRaw, constF(c, 0), constF(c, ny - 1)], s);
+      const i = binValue(c, "+", binValue(c, "*", iy, constF(c, nx), s), ix, s);
+      const cx = binValue(c, "-", binValue(c, "*", constF(c, cellW), binValue(c, "+", ix, constF(c, 0.5), s), s), constF(c, 1), s);
+      const cy = binValue(c, "-", binValue(c, "*", constF(c, cellH), binValue(c, "+", iy, constF(c, 0.5), s), s), constF(c, 1), s);
+      const sh = toShape(c, c.apply(c, f, i, s), s);
+      const cv = c.arena.node({ k: "vec", parts: [asNum(cx, s).ir, asNum(cy, s).ir], t: "vec2" });
+      return { sh, cv };
+    };
+    return {
+      v: "shape",
+      dim: 2,
+      dist: (c, p, s) => {
+        const { sh, cv } = cellAt(c, p, s);
+        const q = binIR(c, "*", binIR(c, "-", p.ir, cv, "vec2"), inv.ir, "vec2");
+        return num(binIR(c, "*", sh.dist(c, vecV(2, q), s).ir, scale.ir, "f32"));
       },
-      span,
-    );
+      colour: (c, p, s) => {
+        const { sh, cv } = cellAt(c, p, s);
+        const q = binIR(c, "*", binIR(c, "-", p.ir, cv, "vec2"), inv.ir, "vec2");
+        return sh.colour(c, vecV(2, q), s);
+      },
+    } as VShape;
   });
 }
 

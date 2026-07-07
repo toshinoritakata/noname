@@ -236,4 +236,14 @@ out strands`,
 out (render (orbit 4 0) (balls |> shade (sun [1,1,1]))
      |> bloom 1.2)`,
   },
+  {
+    name: "16. TVノイズ (entropy)",
+    source: `seed = entropy * 10000
+
+pat = grid [40, 24] \\i ->
+        box 0.45
+        |> fill (hsv 0 0 (hash (i + seed)))
+
+out pat`,
+  },
 ];

@@ -250,6 +250,8 @@ export interface BloomPassSpec {
   id: number;
   /** brightPass(元画像(coord=vec2 ワールド座標)) の式 */
   extract: NodeId;
+  /** ダウンサンプル段数。多いほど滲みの実効半径が広がる。k から適応的に決める(ADR-0024) */
+  levels: number;
   span: Span;
 }
 
