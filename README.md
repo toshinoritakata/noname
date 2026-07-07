@@ -6,6 +6,8 @@ creative coding 向けのライブコーディング言語と、その TypeScrip
 out (circle (0.3 + 0.1 * sin time) |> fill white) <> 0.5s
 ```
 
+![デモ: 標準ライブラリの図形合成・空間操作・彩色・ポストエフェクトを詰め込んだ1シーン](assets/demo.webp)
+
 作品を **`(空間座標, 時間) → 色` の純粋関数** として書き、SDF(符号付き距離場)の代数で図形を合成する。書いたコードはブラウザ内で WGSL にコンパイルされ、WebGPU で実行される。コードを書き換えると、直前のプログラムと新しいプログラムを(`<>` でクロスフェード時間を指定すれば)なめらかに混ぜながら差し替わる。
 
 Conal Elliott の Fran(アニメーション=時間の純粋関数)/ Pan(画像=座標の純粋関数)の系譜を継ぎ、Curv(SDF代数はあるがライブ性なし)と Punctual(ライブ性はあるがSDF代数なし)の間を埋める設計。詳しくは [prior-art.md](prior-art.md) を参照。
@@ -35,9 +37,12 @@ implementation.md      -- 処理系設計(コンパイラ6段 + ランタイム)
 docs/adr/               -- 個々の設計判断の記録(Architecture Decision Records)
 docs/architecture-diagrams.md -- 構成図(mermaid)
 docs/reference.md      -- 実装済みの構文・標準ライブラリの詳細リファレンス
-src/compiler/            -- lexer / parser / 型推論 / staging / WGSL 生成
-src/runtime/             -- WebGPU ランタイム(2スロットクロスフェード・状態管理・入力)
-src/examples.ts          -- サンプル集(エディタの Prev/Next で切り替えられる)
+src/compiler/            -- lexer / parser / 型推論 / staging / パス分割+WGSL生成 / GLSL互換層
+                            / 専用Web Worker(重いコンパイルをメインスレッドから追い出す)
+                            / stdlib(標準ライブラリ、shapes・color・postfx 等カテゴリ別)
+src/runtime/             -- WebGPU ランタイム(2スロットクロスフェード・BufferRegistry・
+                            Worker への薄いクライアント・Clock/audio/mouse/MIDI 等の入力)
+src/examples.ts          -- サンプル集23例(エディタの Prev/Next で切り替えられる)
 test/                    -- node --test 一式(構文・golden・レイテンシ予算 等)
 ```
 

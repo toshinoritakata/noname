@@ -169,8 +169,8 @@ Cam, Dur(時間リテラルの型)
 | 関数 | シグネチャ | 説明 |
 |---|---|---|
 | `a <+> b` | 演算子 | min-union(2図形をそのまま合体)。大きな N の `scatter` は自動でループ化(ADR-0014)、`grid` は O(1) 直接索引(ADR-0022) |
-| `cut tool base` | `Shape -> Shape -> Shape` | `base` から `tool` をくり抜く |
-| `inter a b` | `Shape -> Shape -> Shape` | 交差 |
+| `cut tool base` | `Shape -> Shape -> Shape` | `base` から `tool` をくり抜く。非対称演算なので、`move`/`rot`/`scale`/`outline` などと同じ「モディファイア引数が先、パイプで流す対象(この場合 `base`)が最後」という並びに揃えてある。`base |> cut tool` と書ける |
+| `inter a b` | `Shape -> Shape -> Shape` | 交差。対称演算(`a`/`b` に役割の違いがない)なので `cut` のようなモディファイア/対象の区別はなく、どちらを先に置いても意味は同じ |
 | `blendAll k list` | `Float -> [Shape] -> Shape` | smooth union(スムーズブレンド)で畳み込む。`range n |> map f` で N>24 のとき自動でWGSLループに変換(ADR-0017) |
 | `morph k x` / `morph k a b` | `Float -> Pattern a -> Pattern a` または `Float -> a -> a -> a` | パターンに適用: 要素間の補間幅を設定。図形/値2つに直接適用: 距離と色を同時に線形補間(`morph k a b`) |
 | `outline w x` | `Float -> Shape -> Shape` | 輪郭線化(`abs(dist) - w`)。`line`/`bezier` の太さ付けに使う |
