@@ -101,39 +101,63 @@ const LIB: Record<string, { deps?: string[]; src: string }> = {
   fmod: { src: `fn fmod(a: f32, b: f32) -> f32 { return a - b * floor(a / b); }` },
   fmodv2: { src: `fn fmodv2(a: vec2f, b: vec2f) -> vec2f { return a - b * floor(a / b); }` },
   fmodv3: { src: `fn fmodv3(a: vec3f, b: vec3f) -> vec3f { return a - b * floor(a / b); }` },
+  // 整数ビット列に対する MurmurHash3 の fmix32(既知の高品質アバランシュ関数)。
+  // 入力を10進小数の演算(*0.1031 等)に通す旧実装は f32 の有効桁(約7桁)を
+  // 超える大きさの入力(scatter の N が数万規模、time が長時間経過後など)で
+  // 小数部の情報が失われ、ユニークな出力数が数千〜1万強で頭打ちになる欠陥が
+  // あった(実測: N=100,000 でユニーク数12,025止まり)。IEEE754 のビット列を
+  // そのまま bitcast して混ぜる本実装は、入力の大きさに関係なく異なる浮動小数点
+  // 値なら異なるビット列を持つことを利用するため、この頭打ちが起きない
+  hashMix: {
+    src: `fn hashMix(seed: u32) -> u32 {
+  var v = seed;
+  v = v ^ (v >> 16u);
+  v = v * 0x7feb352du;
+  v = v ^ (v >> 15u);
+  v = v * 0x846ca68bu;
+  v = v ^ (v >> 16u);
+  return v;
+}`,
+  },
   hash11: {
+    deps: ["hashMix"],
     src: `fn hash11(n: f32) -> f32 {
-  var x = fract(n * 0.1031 + 0.113);
-  x *= x + 33.33; x *= x + x;
-  return fract(x);
+  return f32(hashMix(bitcast<u32>(n))) * (1.0 / 4294967296.0);
 }`,
   },
   hash21: {
+    deps: ["hashMix"],
     src: `fn hash21(n: f32) -> vec2f {
-  var p3 = fract(vec3f(n * 0.1031, n * 0.1030, n * 0.0973) + 0.19);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.xx + p3.yz) * p3.zy);
+  let h0 = hashMix(bitcast<u32>(n));
+  let h1 = hashMix(h0 ^ 0x68bc21ebu);
+  return vec2f(f32(h0), f32(h1)) * (1.0 / 4294967296.0);
 }`,
   },
   hash22: {
+    deps: ["hashMix"],
     src: `fn hash22(p: vec2f) -> vec2f {
-  var p3 = fract(vec3f(p.xyx) * vec3f(0.1031, 0.1030, 0.0973));
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.xx + p3.yz) * p3.zy);
+  let hx = hashMix(bitcast<u32>(p.x));
+  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
+  let h0 = hashMix(hx ^ hy);
+  let h1 = hashMix(h0 ^ 0x68bc21ebu);
+  return vec2f(f32(h0), f32(h1)) * (1.0 / 4294967296.0);
 }`,
   },
   hash12: {
+    deps: ["hashMix"],
     src: `fn hash12(p: vec2f) -> f32 {
-  var p3 = fract(vec3f(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
+  let hx = hashMix(bitcast<u32>(p.x));
+  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
+  return f32(hashMix(hx ^ hy)) * (1.0 / 4294967296.0);
 }`,
   },
   hash13: {
+    deps: ["hashMix"],
     src: `fn hash13(p: vec3f) -> f32 {
-  var p3 = fract(p * 0.1031);
-  p3 += dot(p3, p3.zyx + 31.32);
-  return fract((p3.x + p3.y) * p3.z);
+  let hx = hashMix(bitcast<u32>(p.x));
+  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
+  let hz = hashMix(bitcast<u32>(p.z) ^ 0x85ebca6bu);
+  return f32(hashMix(hx ^ hy ^ hz)) * (1.0 / 4294967296.0);
 }`,
   },
   noise2d: {

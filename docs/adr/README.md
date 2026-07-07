@@ -55,6 +55,7 @@
 - [0036](0036-3d-line-bezier-strip-instancing.md) — 3D の line/bezier を sprite と同じ深度テストなしビルボード(カメラ向きリボン)で instanced 描画する(2D限定だったADR-0016を3Dに拡張)
 - [0037](0037-line-bezier-sdf-fully-removed.md) — line/bezier のSDFを完全に廃止し、instanced描画(strip2D/strip3D)専用にする(ADR-0015を撤回。単体使用も含めて move/cut/inter/<+>/if/morph 等との合成はコンパイルエラーになる)
 - [0038](0038-line-bezier-width-application-sugar.md) — `line a b w` は Shape への数値適用として `outline` の糖衣構文にする(固定arityのカリー化では第3引数を追加できないため、確定済みShapeへの追加適用として実現)
+- [0039](0039-hash-bitcast-mix.md) — hash系関数を bitcast+MurmurHash3(fmix32)ベースに置き換える(10進小数演算だった旧実装が大きい入力で衝突頻発だった欠陥の修正。scatterのNが数万規模・time経過が長いセッションで顕著)
 
 ## 未決(ADR 化待ち)
 

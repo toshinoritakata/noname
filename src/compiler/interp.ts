@@ -186,18 +186,38 @@ function len(v: number[]): number {
   return Math.hypot(...v);
 }
 
+// wgsl.ts の hashMix と同一アルゴリズム(MurmurHash3 の fmix32)。ビット列を
+// そのまま混ぜるので、10進小数演算で入力が大きいと衝突が急増する旧実装の
+// 欠陥が起きない(wgsl.ts 側のコメント参照)
+const f32buf = new Float32Array(1);
+const u32buf = new Uint32Array(f32buf.buffer);
+function bitcastF32ToU32(x: number): number {
+  f32buf[0] = x;
+  return u32buf[0];
+}
+function hashMix(seed: number): number {
+  let v = seed >>> 0;
+  v = (v ^ (v >>> 16)) >>> 0;
+  v = Math.imul(v, 0x7feb352d) >>> 0;
+  v = (v ^ (v >>> 15)) >>> 0;
+  v = Math.imul(v, 0x846ca68b) >>> 0;
+  v = (v ^ (v >>> 16)) >>> 0;
+  return v;
+}
 function hash12(p: number[]): number {
-  let p3 = [fract(p[0] * 0.1031), fract(p[1] * 0.1031), fract(p[0] * 0.1031)];
-  const d = p3[0] * (p3[1] + 33.33) + p3[1] * (p3[2] + 33.33) + p3[2] * (p3[0] + 33.33);
-  p3 = p3.map((x) => x + d);
-  return fract((p3[0] + p3[1]) * p3[2]);
+  const hx = hashMix(bitcastF32ToU32(Math.fround(p[0])));
+  const hy = hashMix((bitcastF32ToU32(Math.fround(p[1])) ^ 0x9e3779b9) >>> 0);
+  return hashMix((hx ^ hy) >>> 0) * (1 / 4294967296);
 }
 
 function hash11(n: number): number {
-  let x = fract(n * 0.1031 + 0.113);
-  x *= x + 33.33;
-  x *= x + x;
-  return fract(x);
+  return hashMix(bitcastF32ToU32(Math.fround(n))) * (1 / 4294967296);
+}
+
+function hash21JS(n: number): number[] {
+  const h0 = hashMix(bitcastF32ToU32(Math.fround(n)));
+  const h1 = hashMix((h0 ^ 0x68bc21eb) >>> 0);
+  return [h0 * (1 / 4294967296), h1 * (1 / 4294967296)];
 }
 
 function noise2d(p: number[]): number {
@@ -289,13 +309,8 @@ function callFn(fn: string, args: Num[]): Num {
       return zip(a, b, (x, y) => (y === 0 ? 0 : x - y * Math.floor(x / y)));
     case "hash11":
       return hash11(asNum2(a));
-    case "hash21": {
-      const n = asNum2(a);
-      let p3 = [fract(n * 0.1031), fract(n * 0.103), fract(n * 0.0973)].map((x) => fract(x + 0.19));
-      const d = p3[0] * (p3[1] + 33.33) + p3[1] * (p3[2] + 33.33) + p3[2] * (p3[0] + 33.33);
-      p3 = p3.map((x) => x + d);
-      return [fract((p3[0] + p3[1]) * p3[2]), fract((p3[0] + p3[2]) * p3[1])];
-    }
+    case "hash21":
+      return hash21JS(asNum2(a));
     case "hash12":
       return hash12(asArrN(a));
     case "noise2d":
