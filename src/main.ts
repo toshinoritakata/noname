@@ -40,26 +40,48 @@ async function boot(): Promise<void> {
   resize();
 
   let renderer: Renderer;
-  try {
+
+  // GPU デバイスの初期化+配線。device.lost からの再初期化でも再利用する
+  const setupRenderer = async (): Promise<void> => {
     const gpu = await initGPU(canvas);
     renderer = new Renderer(gpu);
+    renderer.inputs.registerAdapter(makeTuioAdapter());
+    renderer.inputs.onAudioState = setStatus;
+    renderer.onFps = (fps) => {
+      fpsEl.textContent = `${fps.toFixed(0)} fps`;
+    };
+    // デバッグ・検証用フック(インスペクタの足場)
+    (window as unknown as { __noname: unknown }).__noname = renderer;
+    renderer.gpu.device.addEventListener("uncapturederror", (e) => {
+      console.error("[noname webgpu]", (e as GPUUncapturedErrorEvent).error.message);
+    });
+    // GPU デバイスロスト(ドライバリセット・電源管理・VRAM 逼迫等)への対応。
+    // 何もしないと requestAnimationFrame は回り続けるが実際には何も描画されず
+    // 画面が固まったように見える(ADR-0010 の「エラー時も直前の映像を維持する」が
+    // GPU レベルでは効かない)。1回だけ自動再初期化を試みる: 直前の rAF ループを
+    // 止め、新しい device/context/Renderer を作り直し、エディタの内容(GPU側の
+    // simulate 状態は新デバイスには引き継げないが、ソースは失われない)で再評価する
+    renderer.gpu.device.lost.then((info) => {
+      if (info.reason === "destroyed") return; // 明示的破棄(現状は呼んでいない)。再初期化不要
+      console.error("[noname webgpu] device lost:", info.message);
+      renderer.stop();
+      setStatus("GPUデバイスが失われました。再初期化しています…");
+      setupRenderer()
+        .then(() => void runEvaluate())
+        .catch((e2) => {
+          setStatus(`再初期化に失敗しました: ${e2 instanceof Error ? e2.message : e2}`);
+        });
+    });
+  };
+
+  try {
+    await setupRenderer();
   } catch (e) {
     boot.innerHTML = `<div><strong>WebGPU 初期化エラー</strong><br><code>${e instanceof Error ? e.message : e}</code></div>`;
     return;
   }
-  renderer.inputs.registerAdapter(makeTuioAdapter());
-  renderer.inputs.onAudioState = setStatus;
-  renderer.onFps = (fps) => {
-    fpsEl.textContent = `${fps.toFixed(0)} fps`;
-  };
   boot.classList.add("ready");
   boot.textContent = "ready";
-
-  // デバッグ・検証用フック(インスペクタの足場)
-  (window as unknown as { __noname: unknown }).__noname = renderer;
-  renderer.gpu.device.addEventListener("uncapturederror", (e) => {
-    console.error("[noname webgpu]", (e as GPUUncapturedErrorEvent).error.message);
-  });
 
   // ---- サンプル ----
   for (const [i, ex] of EXAMPLES.entries()) {
@@ -72,7 +94,7 @@ async function boot(): Promise<void> {
     const ex = EXAMPLES[(i + EXAMPLES.length) % EXAMPLES.length];
     picker.value = String(EXAMPLES.indexOf(ex));
     editor.value = ex.source;
-    void evaluate();
+    void runEvaluate();
   };
   picker.addEventListener("change", () => loadExample(Number(picker.value)));
   $("prev-example").addEventListener("click", () => loadExample(Number(picker.value) - 1));
@@ -100,6 +122,25 @@ async function boot(): Promise<void> {
         : `swap ${r.compileMs.toFixed(0)}ms`,
     );
   };
+  // evaluate() は Worker への非同期コンパイル往復を含む。実行中に(特に Alt+ドラッグの
+  // スクラブで)pointermove ごとに新しい evaluate() を投げると、Worker のメッセージ
+  // キューに未処理の要求が滞留し、画面の値がポインタに遅れて追従する(ADR-0008 が
+  // 「<1フレーム」を謳う経路が体感で壊れる)。実行中は次を1回だけ「予約」し、完了後に
+  // その時点の最新状態(editor.value)で追いかける(2回以上溜まった分は1回に合流する)
+  let evaluating = false;
+  let evaluateAgain = false;
+  const runEvaluate = async (): Promise<void> => {
+    if (evaluating) {
+      evaluateAgain = true;
+      return;
+    }
+    evaluating = true;
+    do {
+      evaluateAgain = false;
+      await evaluate();
+    } while (evaluateAgain);
+    evaluating = false;
+  };
   // 入力のたびに即評価すると打鍵ごとにコンパイラが走ってしまうため、短い無入力
   // (デバウンス)を待ってから評価する。エラー時は直前の正常プログラムを維持する
   // (ADR-0010)ので、打鍵の途中で構文が壊れていても映像は止まらない
@@ -110,7 +151,7 @@ async function boot(): Promise<void> {
     setStatus("編集中…");
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      void evaluate();
+      void runEvaluate();
     }, DEBOUNCE_MS);
   };
   editor.addEventListener("input", scheduleEvaluate);
@@ -122,7 +163,7 @@ async function boot(): Promise<void> {
         clearTimeout(debounceTimer);
         debounceTimer = null;
       }
-      void evaluate();
+      void runEvaluate();
     }
   });
 
@@ -150,7 +191,7 @@ async function boot(): Promise<void> {
       editor.value = src;
       editor.selectionStart = editor.selectionEnd = selStart;
       scrub.end = scrub.start + text.length;
-      void evaluate(); // 形が同じなら uniform 更新だけ(< 1 フレーム)
+      void runEvaluate(); // 形が同じなら uniform 更新だけ(< 1 フレーム)
     }
   });
   const endScrub = (): void => {

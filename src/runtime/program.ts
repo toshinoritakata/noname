@@ -14,8 +14,46 @@ interface BuiltPass {
   pipeline: GPURenderPipeline;
 }
 
-/** パイプラインキャッシュ: パスの構造ハッシュ → パイプライン(implementation.md 3.4) */
-export type PipelineCache = Map<string, Promise<GPURenderPipeline>>;
+const PIPELINE_CACHE_LIMIT = 128;
+
+/**
+ * パイプラインキャッシュ: パスの構造ハッシュ → パイプライン(implementation.md 3.4)。
+ * ライブコーディングは編集し続けるのが前提の道具で、構造が変わるたびに新しい
+ * ハッシュのパイプラインが積み上がる。ProgramSlot.destroy() 側ではエントリを
+ * 消さない(同じハッシュを別スロットが今後も再利用しうるため)ので、ここで
+ * 上限を設けて最も使われていないものから捨てる(LRU、挿入順を保つ Map の性質を使う)
+ */
+export class PipelineCache {
+  private map = new Map<string, Promise<GPURenderPipeline>>();
+  private limit: number;
+
+  constructor(limit = PIPELINE_CACHE_LIMIT) {
+    this.limit = limit;
+  }
+
+  get(key: string): Promise<GPURenderPipeline> | undefined {
+    const v = this.map.get(key);
+    if (v !== undefined) {
+      // 参照されたので最新として末尾に移動する
+      this.map.delete(key);
+      this.map.set(key, v);
+    }
+    return v;
+  }
+
+  set(key: string, value: Promise<GPURenderPipeline>): void {
+    this.map.delete(key);
+    this.map.set(key, value);
+    if (this.map.size > this.limit) {
+      const oldest = this.map.keys().next().value;
+      if (oldest !== undefined) this.map.delete(oldest);
+    }
+  }
+
+  delete(key: string): void {
+    this.map.delete(key);
+  }
+}
 
 export class ProgramSlot {
   device: GPUDevice;

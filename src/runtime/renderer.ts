@@ -6,7 +6,7 @@ import type { Diagnostic } from "../compiler/diag.ts";
 import type { Gpu } from "./gpu.ts";
 import { WORK_FORMAT } from "./gpu.ts";
 import { Clock, InputEngine } from "./inputs.ts";
-import { ProgramSlot, type PipelineCache } from "./program.ts";
+import { PipelineCache, ProgramSlot } from "./program.ts";
 import { BufferRegistry } from "./registry.ts";
 import { CompilerClient } from "./compiler-client.ts";
 
@@ -23,7 +23,7 @@ export class Renderer {
   clock = new Clock();
   inputs: InputEngine;
   registry: BufferRegistry;
-  private cache: PipelineCache = new Map();
+  private cache: PipelineCache = new PipelineCache();
   private active: ProgramSlot | null = null;
   private old: ProgramSlot | null = null;
   private fadeStart = 0;
@@ -37,6 +37,7 @@ export class Renderer {
   onFps: ((fps: number) => void) | null = null;
   private fpsFrames = 0;
   private fpsWindowStart = 0;
+  private stopped = false;
 
   constructor(gpu: Gpu) {
     this.gpu = gpu;
@@ -44,10 +45,16 @@ export class Renderer {
     this.registry = new BufferRegistry(gpu.device);
     this.blendBuf = gpu.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const loop = (t: number): void => {
+      if (this.stopped) return;
       this.frame(t);
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
+  }
+
+  /** 内部の rAF ループを止める(device.lost からの再初期化で古い Renderer を捨てる時に使う) */
+  stop(): void {
+    this.stopped = true;
   }
 
   /**
