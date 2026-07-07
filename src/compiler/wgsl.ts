@@ -358,6 +358,16 @@ const LIB: Record<string, { deps?: string[]; src: string }> = {
   return vec4f(rgb / max(a, 1e-5), a);
 }`,
   },
+  // top は premultiplied(scene テクスチャの中身 = strip パスが rgb*cov, cov で出したもの)、
+  // bot は straight alpha(背景場)。premultiplied-over で合成し straight alpha で返す。
+  // 2Dストリップを bloom 前の scene テクスチャへ焼き込み、場からサンプルするために使う(ADR-0044)
+  overPremul: {
+    src: `fn overPremul(top: vec4f, bot: vec4f) -> vec4f {
+  let a = top.w + bot.w * (1.0 - top.w);
+  let rgb = top.rgb + bot.rgb * bot.w * (1.0 - top.w);
+  return vec4f(rgb / max(a, 1e-5), a);
+}`,
+  },
   shadeLambert: {
     src: `fn shadeLambert(base: vec4f, n: vec3f, rd: vec3f, l: vec3f) -> vec4f {
   let ndl = max(dot(n, l), 0.0);

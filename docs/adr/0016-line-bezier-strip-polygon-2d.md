@@ -1,7 +1,13 @@
 # ADR-0016: 2D の line/bezier は SDF ではなく三角形ストリップでラスタライズする
 
-- Status: accepted
+- Status: accepted(描画先と合成順のみ [[0044]] で差し替え)
 - Date: 2026-07-05
+
+> **注(2026-07-08)**: 「最終画像(colorTex)へ premultiplied-over で上描きする」という
+> 描画先・合成順の部分は ADR-0044 が差し替えた。現在はストリップを bloom より前の
+> HDR `scene` テクスチャへ描き、場が `scene` をサンプルして合成する(glow+bloom が
+> 2D でも効くようにするため)。三角形ストリップ化・マーカー伝播・退化ベジエ等の
+> 本 ADR の他の決定はそのまま有効。
 
 ## Context
 

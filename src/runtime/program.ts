@@ -169,6 +169,9 @@ export class ProgramSlot {
   private dataTex = new Map<string, GPUTexture[]>();
   /** 最終 image パスの出力 */
   colorTex: GPUTexture | null = null;
+  /** 2Dストリップ層(premultiplied)。bloom より前に描き込み、場が "scene" キーで
+   * サンプルする。これにより glow+bloom が2D line/bezier にも効く(ADR-0044) */
+  sceneTex: GPUTexture | null = null;
   evalTime = 0;
   fadeEndTime = 0;
   private width = 0;
@@ -317,6 +320,11 @@ export class ProgramSlot {
     this.height = height;
     this.colorTex?.destroy();
     this.colorTex = createWorkTexture(this.device, width, height, "slot:color");
+    // 2Dストリップ層(ADR-0044): strip パスがあるときだけ確保
+    this.sceneTex?.destroy();
+    this.sceneTex = this.compiled.passes.some((p) => p.kind === "strip")
+      ? createWorkTexture(this.device, width, height, "slot:scene")
+      : null;
     for (const t of this.rmTex.values()) t.destroy();
     this.rmTex.clear();
     for (const p of this.compiled.passes) {
@@ -421,6 +429,9 @@ export class ProgramSlot {
         const t = this.bloomTex.get(key);
         return t ? cachedView(t) : null;
       }
+      if (key === "scene") {
+        return this.sceneTex ? cachedView(this.sceneTex) : null;
+      }
       const data = key.match(/^((?:data|sprite|strip3?):\d+):(\d+)$/);
       if (data) {
         const t = this.dataTex.get(data[1])?.[Number(data[2])];
@@ -481,6 +492,19 @@ export class ProgramSlot {
       this.draw(encoder, p, [cachedView(tex)], resolve, "load", p.spec.strip3VertexCount, p.spec.strip3Count ?? 1);
     }
 
+    // ---- strip(2D line/bezier の instanced 描画。ADR-0044、ADR-0016 を差し替え) ----
+    // march 不要で三角形ストリップを直接ラスタライズし、bloom より前に scene テクスチャへ
+    // premultiplied で焼き込む(最初のバッチで clear、以降は load で累積)。場が "scene" キーで
+    // これをサンプルして合成するため、glow の明るさが bloom の抽出に拾われ光暈になる
+    if (this.sceneTex) {
+      let firstStrip = true;
+      for (const p of this.passes) {
+        if (p.spec.kind !== "strip" || p.spec.stripVertexCount === undefined) continue;
+        this.draw(encoder, p, [cachedView(this.sceneTex)], resolve, firstStrip ? "clear" : "load", p.spec.stripVertexCount, p.spec.stripCount ?? 1);
+        firstStrip = false;
+      }
+    }
+
     // ---- bloom(ダウンサンプル+ブラー多パス連鎖。ADR-0019) ----
     // 生成順(extract → down1 → down2 → up1 → up0)が依存順そのものなので、
     // compiled.passes の並び順どおりに実行すればよい
@@ -496,13 +520,6 @@ export class ProgramSlot {
       if (p.spec.kind !== "image") continue;
       if (!this.colorTex) continue;
       this.draw(encoder, p, [cachedView(this.colorTex)], resolve);
-    }
-
-    // ---- strip(line/bezier の instanced 描画。march 不要で最終画像に直接上描き。ADR-0016) ----
-    for (const p of this.passes) {
-      if (p.spec.kind !== "strip" || p.spec.stripVertexCount === undefined) continue;
-      if (!this.colorTex) continue;
-      this.draw(encoder, p, [cachedView(this.colorTex)], resolve, "load", p.spec.stripVertexCount, p.spec.stripCount ?? 1);
     }
   }
 
@@ -535,6 +552,7 @@ export class ProgramSlot {
 
   destroy(): void {
     this.colorTex?.destroy();
+    this.sceneTex?.destroy();
     for (const t of this.rmTex.values()) t.destroy();
     for (const texs of this.dataTex.values()) for (const t of texs) t.destroy();
     this.dummyTex?.destroy();

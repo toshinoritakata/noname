@@ -1,2 +1,2 @@
 == image
-vec4(vec4(#0, #0, #0, #0).xyz, (smoothstep(px, (neg px), #1000000000) * vec4(#0, #0, #0, #0).w))
+overPremul(sample[scene](worldToUv(p)), vec4(vec4(#0, #0, #0, #0).xyz, (smoothstep(px, (neg px), #1000000000) * vec4(#0, #0, #0, #0).w)))

@@ -171,6 +171,17 @@ export function toField(ctx: Ctx, v: Value, span: Span): VField {
 }
 
 /** 画像(2Dの色場)へのリフト。Shape2 は flatten(外側透明)される */
+/**
+ * scene テクスチャ(premultiplied な2Dストリップ層。strip パスが bloom より前に
+ * 焼き込む)を背景 base の上に over 合成する。ストリップの寄与を「場のグラフ」に
+ * 含めることで、場を再評価する bloom の抽出(postfx.ts)がストリップを拾えるように
+ * なり、glow+bloom が2D line/bezier にも効く(ADR-0044、ADR-0016 を差し替え)
+ */
+function overSceneStrips(c: Ctx, p: VVec, base: NodeId): VVec {
+  const scene = c.arena.node({ k: "sample", tex: "scene", p: worldToUv(c, p.ir), t: "vec4" });
+  return vecV(4, call(c, "overPremul", [scene, base], "vec4"));
+}
+
 export function toImage(ctx: Ctx, v: Value, span: Span): VField {
   if (v.v === "shape") {
     const sh = v;
@@ -192,13 +203,18 @@ export function toImage(ctx: Ctx, v: Value, span: Span): VField {
       return {
         v: "field",
         dim: 2,
-        fn: (c) => {
+        // 背景は透明。ストリップは scene テクスチャからサンプルして合成する
+        fn: (c, p) => {
           const zero = c.arena.node({ k: "const", v: 0, t: "f32" });
-          return vecV(4, c.arena.node({ k: "vec", parts: [zero, zero, zero, zero], t: "vec4" }));
+          const transparent = c.arena.node({ k: "vec", parts: [zero, zero, zero, zero], t: "vec4" });
+          return overSceneStrips(c, p, transparent);
         },
         stripBatches: [batch],
       };
     }
+    // 集約後の2Dストリップバッチ(scatter した line/bezier)を持つ図形は、SDF背景の
+    // 上に scene テクスチャのストリップ層を合成する。持たない図形は従来どおり
+    const hasStrips = (sh.stripBatches?.length ?? 0) > 0;
     return {
       v: "field",
       dim: 2,
@@ -212,7 +228,8 @@ export function toImage(ctx: Ctx, v: Value, span: Span): VField {
         const a0 = c.arena.node({ k: "swiz", a: col.ir, sel: "w", t: "f32" });
         const aa = c.arena.node({ k: "bin", op: "*", a: alpha, b: a0, t: "f32" });
         const rgb = c.arena.node({ k: "swiz", a: col.ir, sel: "xyz", t: "vec3" });
-        return vecV(4, c.arena.node({ k: "vec", parts: [rgb, aa], t: "vec4" }));
+        const baseCol = c.arena.node({ k: "vec", parts: [rgb, aa], t: "vec4" });
+        return hasStrips ? overSceneStrips(c, p, baseCol) : vecV(4, baseCol);
       },
       stripBatches: sh.stripBatches,
     };

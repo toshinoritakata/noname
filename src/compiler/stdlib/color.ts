@@ -106,8 +106,9 @@ export function installColor(add: AddFn, addV: AddVFn): void {
       const sh = toShape(ctx, x, span);
       const boostOf = (c: Ctx, kIr: NodeId): NodeId =>
         binIR(c, "+", c.arena.node({ k: "const", v: 1, t: "f32" }), binIR(c, "*", kIr, c.arena.node({ k: "const", v: 2.5, t: "f32" }), "f32"), "f32");
-      // 明るさ変換は座標非依存なので、単項マーカーの色にも同じ式を積める。
-      // strip2D は2Dストリップの glow 描画が未対応のため明示的に落とす(暗黙の脱落ではない)
+      // 明るさ変換は座標非依存なので、単項マーカー(sprite/strip2D/strip3D)の色にも同じ式を積む。
+      // strip2D も運ぶ: 2Dストリップは scene テクスチャ経由で bloom 前に合成されるため、
+      // glow の明るさブーストが bloom の光暈として正しく効く(ADR-0044)
       const brighten = (colour: VVec): VVec => {
         const boost = boostOf(ctx, kn.ir);
         const rgb = binIR(ctx, "*", ctx.arena.node({ k: "swiz", a: colour.ir, sel: "xyz", t: "vec3" }), boost, "vec3");
@@ -124,7 +125,7 @@ export function installColor(add: AddFn, addV: AddVFn): void {
           const a = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
           return vecV(4, c.arena.node({ k: "vec", parts: [brightened, a], t: "vec4" }));
         },
-        ...recolorMarkers(sh, brighten, ["strip2D"]),
+        ...recolorMarkers(sh, brighten),
       } as VShape;
     }),
   );

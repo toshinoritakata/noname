@@ -60,6 +60,7 @@
 - [0041](0041-instanced-batch-count-in-pass-hash.md) — instanced描画バッチ(sprite/strip/strip3d)のパスハッシュに count を含める(scatterの要素数を変えても再コンパイルが走らず本数が変わらなかったバグの修正)
 - [0042](0042-per-frame-gpu-encoding-caches.md) — フレームごとのGPUエンコード負荷を削減する(テクスチャビュー・バインドグループのメモ化。「形が同じなら再構築しない」をGPUリソース層にも拡張。bloomアップサンプルのタップ削減は見た目が変わるリスクがあるため見送り)
 - [0043](0043-procedural-texture-fields.md) — 基本的なプロシージャルテクスチャ(checker/voronoi/brick)をネイティブField追加する(FFIは突飛な柄専用のエスケープハッチとして残し、よく使う基本形だけstripes/noiseと同じ流儀で追加)
+- [0044](0044-2d-strips-into-pre-bloom-hdr-scene.md) — 2Dのline/bezierストリップをbloom前のHDR `scene`テクスチャへ焼き込み、場が`scene`をサンプルして合成する(ADR-0016の「最終画像へ直接上描き」を差し替え)。`glow`が`strip2D`を運ぶようになり、2D line/bezierにもglow+bloomの光暈が効く
 
 ## 未決(ADR 化待ち)
 
