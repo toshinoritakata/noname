@@ -285,4 +285,13 @@ out (circle (0.3 + 0.05 * sin time)
      |> glow 0.6
      |> move [0, 0.05 * sin (time * 2)])`,
   },
+  {
+    name: "21. グリッチ (glitch)",
+    source: `pat = grid [8, 8] \\i ->
+        box 0.3
+        |> rot (time * 0.2 + hash i * tau)
+        |> fill (hsv (hash i * 0.2 + 0.6) 0.6 1)
+
+out (pat |> glitch (0.3 + 0.2 * sin (time * 0.7)))`,
+  },
 ];

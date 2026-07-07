@@ -197,6 +197,7 @@ Cam, Dur(時間リテラルの型)
 | `chromatic k x` | `Float -> Image -> Image` | 色収差 |
 | `grain k x` | `Float -> Image -> Image` | フィルムグレイン(時間で変化するノイズ) |
 | `vignette k x` | `Float -> Image -> Image` | 周辺減光 |
+| `glitch k x` | `Float -> Image -> Image` | 走査線帯を時間で離散的に発火させ、水平方向のずれ+色収差をバースト的に加える。`k` が大きいほど発火する帯が増える |
 
 ### 4.6 場プリミティブ・乱数
 

@@ -91,6 +91,15 @@ test("同じ文字列を複数回使っても textTextures は重複しない", 
   assert.equal(r.program!.textTextures.length, 1);
 });
 
+test("glitch は image パスにコンパイルされる", () => {
+  const r = compile(`out (circle 0.3 |> fill white |> glitch 0.5)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  const image = r.program!.passes.find((p) => p.kind === "image");
+  assert.ok(image);
+  assert.match(image!.code, /hash11/);
+});
+
 test("大きな scatter は WGSL の for ループになる", () => {
   const r = compile(`out (scatter 300 \\i -> circle 0.01 |> move [hash i * 2 - 1, hash (i+7) * 2 - 1])`);
   assert.ok(r.program, JSON.stringify(r.diagnostics));

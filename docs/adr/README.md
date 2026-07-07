@@ -50,6 +50,7 @@
 - [0031](0031-http-json-input-via-ui-configured-url.md) — (撤回・[0033](0033-websocket-input-replaces-http-polling.md)に差し替え) HTTP(JSON)入力を、UIで設定するURL+固定名スカラー `http.value` として追加する案
 - [0032](0032-text-glyph-rendering-via-canvas2d-raster.md) — `text` は Canvas2D でラスタライズした文字列を疑似SDFのShapeとして扱う(1行文字列リテラルを新規追加、コンパイラはDOM非依存のまま維持)
 - [0033](0033-websocket-input-replaces-http-polling.md) — WebSocket 入力(`ws.value`)を追加し、HTTPポーリング(ADR-0031)を置き換える(5秒遅延の解消、URLをUIに置く判断は継承)
+- [0034](0034-glitch-postfx-band-burst.md) — `glitch` は走査線帯×離散時間ステップのバースト発火として実装する(単純な全画面ノイズではなく疎で離散的な発火にする)
 
 ## 未決(ADR 化待ち)
 

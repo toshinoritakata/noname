@@ -133,6 +133,52 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
     }),
   );
   addV(
+    "glitch",
+    bi("glitch", 2, (ctx, [k, x], span) => {
+      const kn = asNum(k, span);
+      const img = toImage(ctx, x, span);
+      // 走査線を帯(band)に分け、時間を離散ステップ(tick)に刻んで「帯ごと・
+      // ステップごと」に決まる疑似乱数で発生させる。常時ではなくバースト的に
+      // 走るのが glitch らしさの肝(毎フレーム変わり続けると単なるノイズになる)
+      return liftField(img, (c, p, s) => {
+        const cnum = (v: number) => c.arena.node({ k: "const", v, t: "f32" });
+        const px = c.arena.node({ k: "swiz", a: p.ir, sel: "x", t: "f32" });
+        const py = c.arena.node({ k: "swiz", a: p.ir, sel: "y", t: "f32" });
+        const t = timeNode(c);
+        const band = call(c, "floor", [binIR(c, "*", py, cnum(60), "f32")], "f32");
+        const tick = call(c, "floor", [binIR(c, "*", t, cnum(10), "f32")], "f32");
+        const seedA = binIR(c, "+", binIR(c, "*", band, cnum(13.37), "f32"), binIR(c, "*", tick, cnum(7.91), "f32"), "f32");
+        const seedB = binIR(c, "+", binIR(c, "*", band, cnum(3.1), "f32"), binIR(c, "*", tick, cnum(2.7), "f32"), "f32");
+        const nAmt = call(c, "hash11", [seedA], "f32");
+        const nDir = call(c, "hash11", [seedB], "f32");
+        // k が大きいほど閾値が下がり、発火する帯が増える
+        const threshold = binIR(c, "-", cnum(1), binIR(c, "*", kn.ir, cnum(1.2), "f32"), "f32");
+        const active = call(c, "step", [threshold, nAmt], "f32");
+        const shiftMag = binIR(
+          c,
+          "*",
+          binIR(c, "-", binIR(c, "*", nDir, cnum(2), "f32"), cnum(1), "f32"),
+          binIR(c, "*", kn.ir, cnum(0.25), "f32"),
+          "f32",
+        );
+        const shiftedX = binIR(c, "+", px, binIR(c, "*", shiftMag, active, "f32"), "f32");
+        // 発火中の帯だけ、ずれた位置を中心に RGB をわずかに割って色収差バーストにする
+        const chromaOff = binIR(c, "*", active, binIR(c, "*", kn.ir, cnum(0.015), "f32"), "f32");
+        const pr = vecV(2, c.arena.node({ k: "vec", parts: [binIR(c, "+", shiftedX, chromaOff, "f32"), py], t: "vec2" }));
+        const pg = vecV(2, c.arena.node({ k: "vec", parts: [shiftedX, py], t: "vec2" }));
+        const pb = vecV(2, c.arena.node({ k: "vec", parts: [binIR(c, "-", shiftedX, chromaOff, "f32"), py], t: "vec2" }));
+        const cr = img.fn(c, pr, s) as VVec;
+        const cg = img.fn(c, pg, s) as VVec;
+        const cb = img.fn(c, pb, s) as VVec;
+        const r = c.arena.node({ k: "swiz", a: cr.ir, sel: "x", t: "f32" });
+        const g = c.arena.node({ k: "swiz", a: cg.ir, sel: "y", t: "f32" });
+        const b = c.arena.node({ k: "swiz", a: cb.ir, sel: "z", t: "f32" });
+        const a = c.arena.node({ k: "swiz", a: cg.ir, sel: "w", t: "f32" });
+        return vecV(4, c.arena.node({ k: "vec", parts: [r, g, b, a], t: "vec4" }));
+      });
+    }),
+  );
+  addV(
     "vignette",
     bi("vignette", 2, (ctx, [k, x], span) => {
       const kn = asNum(k, span);
