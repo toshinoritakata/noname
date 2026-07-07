@@ -7,7 +7,7 @@
 
 import type { Bind, Expr, Program } from "./ast.ts";
 import { CompileError, type Diagnostic, type Span } from "./diag.ts";
-import { IRArena, vecType, type NodeId } from "./ir.ts";
+import { IRArena, mapChildren, vecType, type NodeId } from "./ir.ts";
 import {
   asNum,
   asVec,
@@ -381,42 +381,12 @@ export function substTime(ctx: Ctx, root: NodeId, newTime: NodeId): NodeId {
     if (hit !== undefined) return hit;
     const n = a.get(id);
     let out: NodeId;
-    switch (n.k) {
-      case "input":
-        out = n.name === "time" ? newTime : id;
-        break;
-      case "bin":
-        out = a.node({ ...n, a: go(n.a), b: go(n.b) });
-        break;
-      case "un":
-        out = a.node({ ...n, a: go(n.a) });
-        break;
-      case "call":
-        out = a.node({ ...n, args: n.args.map(go) });
-        break;
-      case "vec":
-        out = a.node({ ...n, parts: n.parts.map(go) });
-        break;
-      case "swiz":
-        out = a.node({ ...n, a: go(n.a) });
-        break;
-      case "select":
-        out = a.node({ ...n, c: go(n.c), a: go(n.a), b: go(n.b) });
-        break;
-      case "sample":
-        out = a.node({ ...n, p: go(n.p) });
-        break;
-      case "fetch":
-        out = a.node({ ...n, i: go(n.i) });
-        break;
-      case "loop":
-        out = a.node({ ...n, init: go(n.init), body: go(n.body) });
-        break;
-      case "ffi":
-        out = a.node({ ...n, args: n.args.map(go) });
-        break;
-      default:
-        out = id;
+    if (n.k === "input") {
+      out = n.name === "time" ? newTime : id;
+    } else {
+      // 子を持たない葉は mapChildren が n をそのまま返す(rebuilt === n)
+      const rebuilt = mapChildren(n, go);
+      out = rebuilt === n ? id : a.node(rebuilt);
     }
     memo.set(id, out);
     return out;

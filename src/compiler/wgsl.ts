@@ -7,7 +7,9 @@
 import type { Span } from "./diag.ts";
 import {
   buildVec4Roots,
+  childrenOf,
   fnv1a,
+  mapChildren,
   padOffset,
   vecLen,
   vecType,
@@ -696,51 +698,6 @@ class Codegen {
   }
 }
 
-/**
- * ノードの子(NodeId 参照)を rw() で置き換えた「新しいノードの形」を返す
- * (まだ arena.node() でインターンしていない)。子を持たないノード種は n を
- * そのまま返す。
- *
- * childrenOf / rewriteDag / transformLoops はすべてここを経由する。以前は
- * 3箇所に同じ switch(n.k) を独立に書いており、IRNode に新しい種類を追加した
- * ときに更新漏れが起きやすかった(実際にループ生成のバグの遠因にもなった)。
- * 一箇所に統一することで、新しいノード種を足すときの更新箇所を1つに絞る。
- */
-function rebuildChildren(n: IRNode, rw: (id: NodeId) => NodeId): IRNode {
-  switch (n.k) {
-    case "bin":
-      return { ...n, a: rw(n.a), b: rw(n.b) };
-    case "un":
-    case "swiz":
-      return { ...n, a: rw(n.a) };
-    case "call":
-      return { ...n, args: n.args.map(rw) };
-    case "vec":
-      return { ...n, parts: n.parts.map(rw) };
-    case "select":
-      return { ...n, c: rw(n.c), a: rw(n.a), b: rw(n.b) };
-    case "sample":
-      return { ...n, p: rw(n.p) };
-    case "fetch":
-      return { ...n, i: rw(n.i) };
-    case "loop":
-      return { ...n, init: rw(n.init), body: rw(n.body) };
-    case "ffi":
-      return { ...n, args: n.args.map(rw) };
-    default:
-      return n;
-  }
-}
-
-function childrenOf(n: IRNode): NodeId[] {
-  const ids: NodeId[] = [];
-  rebuildChildren(n, (id) => {
-    ids.push(id);
-    return id;
-  });
-  return ids;
-}
-
 function fmtF(v: number): string {
   if (!Number.isFinite(v)) return v > 0 ? "1e9" : "-1e9";
   const s = String(v);
@@ -771,7 +728,7 @@ function rewriteDag(arena: IRArena, root: NodeId, replace: Map<NodeId, NodeId>):
     const hit = memo.get(id);
     if (hit !== undefined) return hit;
     const n = arena.get(id);
-    const rebuilt = rebuildChildren(n, rw);
+    const rebuilt = mapChildren(n, rw);
     const res = rebuilt === n ? id : arena.node(rebuilt);
     memo.set(id, res);
     return res;
@@ -793,7 +750,7 @@ function transformLoops(arena: IRArena, root: NodeId, out: DataPassIR[]): NodeId
       const body = hoistLoopBody(arena, n.id, n.count, body0, out);
       res = arena.node({ ...n, init, body });
     } else {
-      const rebuilt = rebuildChildren(n, rw);
+      const rebuilt = mapChildren(n, rw);
       res = rebuilt === n ? id : arena.node(rebuilt);
     }
     memo.set(id, res);

@@ -254,6 +254,54 @@ export class IRArena {
   }
 }
 
+// ---- IR ノードの子を辿る唯一の再帰(hash-consing を跨ぐ書き換えの土台) --------
+//
+// IRNode の「子 NodeId をすべて別の id に写す」操作は、DAG 書き換え(rewriteDag /
+// transformLoops、wgsl.ts)・子の収集(childrenOf)・time 置換(substTime、stage.ts)
+// で必要になる。以前はそれぞれが独立に switch(n.k) を持ち、ノード種を足すたびに
+// 更新漏れが起きやすかった(ループ生成バグの遠因になった)。ここに1箇所へ統一し、
+// 各利用側はこの mapChildren を経由する。scalar ペイロード(op/fn/sel/tex/name…)は
+// 触らず、子の位置(NodeId)だけを rw で写した新しいノードを返す。子を持たない
+// 葉(coord/input/uniform/const/rmctx/loopi/loopacc)は元のノードをそのまま返す
+// (呼び出し側は `rebuilt === n` で「変化なし」を判定できる)。
+
+/** n の全ての子 NodeId を rw で写した新しいノードを返す。葉は n をそのまま返す */
+export function mapChildren(n: IRNode, rw: (id: NodeId) => NodeId): IRNode {
+  switch (n.k) {
+    case "bin":
+      return { ...n, a: rw(n.a), b: rw(n.b) };
+    case "un":
+    case "swiz":
+      return { ...n, a: rw(n.a) };
+    case "call":
+      return { ...n, args: n.args.map(rw) };
+    case "vec":
+      return { ...n, parts: n.parts.map(rw) };
+    case "select":
+      return { ...n, c: rw(n.c), a: rw(n.a), b: rw(n.b) };
+    case "sample":
+      return { ...n, p: rw(n.p) };
+    case "fetch":
+      return { ...n, i: rw(n.i) };
+    case "loop":
+      return { ...n, init: rw(n.init), body: rw(n.body) };
+    case "ffi":
+      return { ...n, args: n.args.map(rw) };
+    default:
+      return n;
+  }
+}
+
+/** n の直接の子 NodeId を(出現順に)列挙する */
+export function childrenOf(n: IRNode): NodeId[] {
+  const ids: NodeId[] = [];
+  mapChildren(n, (id) => {
+    ids.push(id);
+    return id;
+  });
+  return ids;
+}
+
 export function fnv1a(s: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
