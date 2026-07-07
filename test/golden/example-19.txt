@@ -1,0 +1,2 @@
+== image
+vec4(vec4(hsv2rgb(vec3(fract(((http.value * u0(0.001)) + (time * u1(0.03)))), u2(0.6), u3(1))), #1).xyz, (smoothstep(px, (neg px), (length(p) - (u4(0.3) + (u5(0.05) * sin(time))))) * vec4(hsv2rgb(vec3(fract(((http.value * u0(0.001)) + (time * u1(0.03)))), u2(0.6), u3(1))), #1).w))

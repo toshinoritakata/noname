@@ -25,6 +25,22 @@ export interface InputAdapter {
   start?(): void;
 }
 
+/** HTTP データ入力(ADR-0031)のポーリング間隔。1フレーム(16ms)には到底収まらないので、
+ * OSC/audio と同じ「バックグラウンドで定期取得し、最新値をその都度参照する」形にする */
+const HTTP_POLL_MS = 5000;
+
+/** JSON の中からドット区切りのパス(例 "current.temp_c")で値を取り出す。
+ * 数字だけのセグメントは配列添字としても機能する(JSではキーが文字列でも同じ) */
+function getJsonPath(obj: unknown, path: string): unknown {
+  if (!path) return obj;
+  let cur: unknown = obj;
+  for (const seg of path.split(".")) {
+    if (cur === null || cur === undefined || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[seg];
+  }
+  return cur;
+}
+
 // ---- Clock ----------------------------------------------------------------------
 
 export class Clock {
@@ -72,6 +88,11 @@ export class InputEngine {
   camTexture: GPUTexture | null = null;
   private cameraRequested = false;
   onCameraState: ((state: string) => void) | null = null;
+  private httpUrl: string | null = null;
+  private httpPath = "";
+  private httpValue = 0;
+  private httpTimer: ReturnType<typeof setInterval> | null = null;
+  onHttpState: ((state: string) => void) | null = null;
 
   constructor(device: GPUDevice, canvas: HTMLCanvasElement) {
     this.device = device;
@@ -222,12 +243,47 @@ export class InputEngine {
       });
   }
 
+  /** UI(エディタ横のテキストボックス、ADR-0031)から呼ばれる。URL は言語仕様に
+   * 持ち込まない(この言語には1行文字列リテラルが無く、UI側の設定で十分なため)。
+   * URL が空なら停止するだけ(前回値は最後に取れた値のまま残る、ADR-0010 の精神) */
+  setHttpSource(url: string, path: string): void {
+    if (this.httpTimer !== null) {
+      clearInterval(this.httpTimer);
+      this.httpTimer = null;
+    }
+    this.httpUrl = url || null;
+    this.httpPath = path;
+    if (!this.httpUrl) {
+      this.onHttpState?.("");
+      return;
+    }
+    const poll = (): void => {
+      fetch(this.httpUrl!)
+        .then((r) => r.json())
+        .then((obj) => {
+          const v = getJsonPath(obj, this.httpPath);
+          if (typeof v === "number" && Number.isFinite(v)) {
+            this.httpValue = v;
+            this.onHttpState?.(`http: ${v}`);
+          } else {
+            this.onHttpState?.(`http: パス "${this.httpPath}" が数値ではありません`);
+          }
+        })
+        .catch((e) => {
+          this.onHttpState?.(`http: 失敗 (${e?.message ?? e})`);
+        });
+    };
+    poll();
+    this.httpTimer = setInterval(poll, HTTP_POLL_MS);
+  }
+
   /** 毎フレーム更新。値は values に貯まり、ProgramSlot が uniform に書く */
   frame(dt: number, queue: GPUQueue): void {
     this.values.set("mouse.x", this.mouseX);
     this.values.set("mouse.y", this.mouseY);
     this.values.set("mouse.down", this.mouseDown);
     this.values.set("entropy", Math.random()); // 真の乱数は入力として注入し、作品関数自体は純粋に保つ(ADR-0021)
+    this.values.set("http.value", this.httpValue);
 
     if (this.analyser && this.fftBins) {
       this.analyser.getFloatFrequencyData(this.fftBins as Float32Array<ArrayBuffer>);

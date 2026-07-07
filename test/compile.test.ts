@@ -67,6 +67,13 @@ test("webcam は cam テクスチャを参照する image パスにコンパイ�
   assert.ok(image.textures.includes("cam"), JSON.stringify(image.textures));
 });
 
+test("http.value は入力参照にコンパイルされる(ADR-0031)", () => {
+  const r = compile(`out (circle (0.2 + http.value * 0.01) |> fill white)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(r.program!.uniformLayout.inputs.includes("http.value"));
+});
+
 test("大きな scatter は WGSL の for ループになる", () => {
   const r = compile(`out (scatter 300 \\i -> circle 0.01 |> move [hash i * 2 - 1, hash (i+7) * 2 - 1])`);
   assert.ok(r.program, JSON.stringify(r.diagnostics));

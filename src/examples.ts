@@ -268,4 +268,14 @@ out (webcam
      |> chromatic 0.04
      |> vignette 0.35)`,
   },
+  {
+    name: "19. HTTPデータ (http.value)",
+    source: `-- エディタ横の Data URL / JSON path に数値APIを設定すると反映される
+-- (未設定時は http.value = 0)。API の値の大きさは何でもいいように
+-- fract で色相に折り畳んでいる(未設定でも time だけで色が回る)
+hue = fract (http.value * 0.001 + time * 0.03)
+
+out (circle (0.3 + 0.05 * sin time)
+     |> fill (hsv hue 0.6 1))`,
+  },
 ];
