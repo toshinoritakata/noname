@@ -2,7 +2,7 @@
 // すべての入力は「毎フレーム書かれるスカラー uniform」か「エンティティ表テクスチャ」に
 // 正規化される。拡張点は InputAdapter の1インタフェースのみ。
 
-import { WORK_FORMAT } from "./gpu.ts";
+import { createWorkTexture, WORK_FORMAT } from "./gpu.ts";
 
 // ---- InputAdapter(設計の拡張点) ------------------------------------------------
 
@@ -68,6 +68,10 @@ export class InputEngine {
   private mouseY = 0;
   private mouseDown = 0;
   onAudioState: ((state: string) => void) | null = null;
+  private video: HTMLVideoElement | null = null;
+  camTexture: GPUTexture | null = null;
+  private cameraRequested = false;
+  onCameraState: ((state: string) => void) | null = null;
 
   constructor(device: GPUDevice, canvas: HTMLCanvasElement) {
     this.device = device;
@@ -111,9 +115,15 @@ export class InputEngine {
   }
 
   /** プログラムが使う入力名に応じてサブシステムを起こす */
-  ensure(inputNames: string[], derived: { name: string; source: string; kind: "lag"; k: number }[], usesFft: boolean): void {
+  ensure(
+    inputNames: string[],
+    derived: { name: string; source: string; kind: "lag"; k: number }[],
+    usesFft: boolean,
+    usesCamera = false,
+  ): void {
     const needsAudio = usesFft || inputNames.some((n) => n.startsWith("audio.") || (n.startsWith("lag:audio.") ?? false));
     if (needsAudio) this.initAudio();
+    if (usesCamera) this.initCamera();
     if (inputNames.some((n) => n.startsWith("midi."))) this.initMidi();
     for (const name of inputNames) {
       const m = name.match(/^([a-zA-Z0-9_]+)\./);
@@ -185,6 +195,33 @@ export class InputEngine {
       .catch(() => {});
   }
 
+  /** Webcam(`webcam`、ADR-0030): 実解像度が分かってからテクスチャを確保し、
+   * 毎フレーム copyExternalImageToTexture で直接GPUへコピーする(CPU側での
+   * ピクセル読み出しを経由しない) */
+  private initCamera(): void {
+    if (this.cameraRequested) return;
+    this.cameraRequested = true;
+    this.onCameraState?.("カメラを要求中…");
+    navigator.mediaDevices
+      .getUserMedia({ video: true })
+      .then((stream) => {
+        const video = document.createElement("video");
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        video.addEventListener("loadedmetadata", () => {
+          this.camTexture?.destroy();
+          this.camTexture = createWorkTexture(this.device, video.videoWidth, video.videoHeight, "webcam");
+          this.onCameraState?.("webcam: on");
+        });
+        void video.play();
+        this.video = video;
+      })
+      .catch((e) => {
+        this.onCameraState?.(`webcam: 失敗 (${e?.message ?? e})`);
+      });
+  }
+
   /** 毎フレーム更新。値は values に貯まり、ProgramSlot が uniform に書く */
   frame(dt: number, queue: GPUQueue): void {
     this.values.set("mouse.x", this.mouseX);
@@ -219,6 +256,14 @@ export class InputEngine {
           { width: 512, height: 1 },
         );
       }
+    }
+
+    if (this.video && this.camTexture && this.video.readyState >= this.video.HAVE_CURRENT_DATA) {
+      queue.copyExternalImageToTexture(
+        { source: this.video },
+        { texture: this.camTexture },
+        { width: this.camTexture.width, height: this.camTexture.height },
+      );
     }
 
     // lag(指数平滑)。実装は CPU 側の派生入力(implementation.md の時間族)

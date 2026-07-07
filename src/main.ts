@@ -48,6 +48,7 @@ async function boot(): Promise<void> {
     renderer.inputs.registerAdapter(makeTuioAdapter());
     renderer.inputs.registerAdapter(makeOscAdapter());
     renderer.inputs.onAudioState = setStatus;
+    renderer.inputs.onCameraState = setStatus;
     renderer.onFps = (fps) => {
       fpsEl.textContent = `${fps.toFixed(0)} fps`;
     };

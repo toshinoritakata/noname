@@ -59,6 +59,14 @@ test("osc.f の範囲外(32以上)はコンパイルエラー", () => {
   assert.equal(r.program, null);
 });
 
+test("webcam は cam テクスチャを参照する image パスにコンパイルされる(ADR-0030)", () => {
+  const r = compile(`out (webcam |> chromatic 0.05)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  const image = r.program!.passes.find((p) => p.kind === "image")!;
+  assert.ok(image.textures.includes("cam"), JSON.stringify(image.textures));
+});
+
 test("大きな scatter は WGSL の for ループになる", () => {
   const r = compile(`out (scatter 300 \\i -> circle 0.01 |> move [hash i * 2 - 1, hash (i+7) * 2 - 1])`);
   assert.ok(r.program, JSON.stringify(r.diagnostics));

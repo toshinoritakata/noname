@@ -1,8 +1,9 @@
 // 入力(ADR-0012: スカラー uniform とエンティティ表)。元 stdlib.ts 1666-1742行。
 
-import { asNum, fail, inputNum, num, staticNum, vecV } from "../ops.ts";
+import { asNum, fail, inputNum, num, staticNum, vecV, worldToUv } from "../ops.ts";
 import { bi, binIR, rec } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
+import type { VField } from "../value.ts";
 
 export function installInputs(add: AddFn, addV: AddVFn): void {
   add("audio", (ctx) =>
@@ -72,6 +73,16 @@ export function installInputs(add: AddFn, addV: AddVFn): void {
       ],
     ]),
   );
+  // webcam(ADR-0030): prev/simulate と同じ「2Dテクスチャを worldToUv でサンプルする
+  // Field」パターン。3D用の `camera eye target` コンストラクタと名前が衝突しないよう
+  // `webcam` にした
+  add("webcam", (ctx) => {
+    return {
+      v: "field",
+      dim: 2,
+      fn: (c, p) => vecV(4, c.arena.node({ k: "sample", tex: "cam", p: worldToUv(c, p.ir), t: "vec4" })),
+    } as VField;
+  });
   add("tuio", () =>
     rec([
       [

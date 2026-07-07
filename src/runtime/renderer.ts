@@ -74,7 +74,12 @@ export class Renderer {
     // ---- 高速経路: 形が同じ → uniform 更新のみ(< 1 フレーム、ADR-0008) ----
     if (this.active && this.active.compiled.programHash === result.program.programHash) {
       this.active.updateLiterals(result.program);
-      this.inputs.ensure(result.program.uniformLayout.inputs, result.program.derivedInputs, this.usesFft(result.program));
+      this.inputs.ensure(
+      result.program.uniformLayout.inputs,
+      result.program.derivedInputs,
+      this.usesFft(result.program),
+      this.usesTexture(result.program, "cam"),
+    );
       return { diagnostics: result.diagnostics, outcome: "fast", compileMs: performance.now() - t0 };
     }
 
@@ -103,7 +108,12 @@ export class Renderer {
     if (this.old) for (const s of this.old.compiled.sims) liveNames.add(s.name);
     this.registry.gc(liveNames);
 
-    this.inputs.ensure(result.program.uniformLayout.inputs, result.program.derivedInputs, this.usesFft(result.program));
+    this.inputs.ensure(
+      result.program.uniformLayout.inputs,
+      result.program.derivedInputs,
+      this.usesFft(result.program),
+      this.usesTexture(result.program, "cam"),
+    );
 
     // スワップ開始
     this.old?.destroy();
@@ -119,7 +129,11 @@ export class Renderer {
   }
 
   private usesFft(p: { passes: { textures: string[] }[] }): boolean {
-    return p.passes.some((pass) => pass.textures.includes("fft"));
+    return this.usesTexture(p, "fft");
+  }
+
+  private usesTexture(p: { passes: { textures: string[] }[] }, key: string): boolean {
+    return p.passes.some((pass) => pass.textures.includes(key));
   }
 
   private getInputFor(slot: ProgramSlot): (name: string) => number {
@@ -172,6 +186,7 @@ export class Renderer {
 
     const resolveExtra = (key: string): GPUTextureView | null => {
       if (key === "fft") return this.inputs.fftTexture?.createView() ?? null;
+      if (key === "cam") return this.inputs.camTexture?.createView() ?? null;
       if (key.startsWith("ent:")) return this.inputs.adapterTexture(key)?.createView() ?? null;
       return null;
     };
