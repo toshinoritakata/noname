@@ -1,0 +1,49 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # tsc は package.json の devDependencies に含めていない(ADR-0006: 実行時依存ゼロ、
+      # ローカルではグローバルインストール済みの tsc を使う前提)ので、CIだけこの場で入れる
+      - run: npm install -g typescript@6.0.3
+      - run: npm ci
+      - run: npm run build
+      - run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r dist _site/dist
+          mkdir -p _site/src
+          cp src/styles.css _site/src/styles.css
+          cp -r assets _site/assets
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
