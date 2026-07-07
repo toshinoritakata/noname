@@ -9,12 +9,14 @@ import type { Bind, Expr, Program } from "./ast.ts";
 import { CompileError, type Diagnostic, type Span } from "./diag.ts";
 import { IRArena, vecType, type NodeId } from "./ir.ts";
 import {
+  asNum,
   asVec,
   binValue,
   describe,
   fail,
   negValue,
   num,
+  outlineShape,
   selectValue,
   simToField,
   toImage,
@@ -277,6 +279,18 @@ function applyValue(ctx: Ctx, fn: Value, arg: Value, span: Span): Value {
       return sampleField(ctx, fn, arg, span);
     case "sim":
       return sampleField(ctx, simToField(ctx, fn.handle), arg, span);
+    case "shape": {
+      // line/bezier(strip2D/strip3D持ち)に数値を直接適用すると `outline` と
+      // 同じ意味になる(`line a b w` = `line a b |> outline w`、ADR-0038)。
+      // この言語はカリー化(固定arity)なので、`line`/`bezier` 自体に幅を
+      // 受け取る第3/第4引数を追加することはできない(2引数版と3引数版を
+      // 同じ名前で共存させられない)ため、確定済みの Shape に「もう1引数」
+      // 渡す形をこのケースで拾う
+      if (fn.strip2D || fn.strip3D) {
+        return outlineShape(ctx, fn, asNum(arg, span), span);
+      }
+      fail(`${describe(fn)} は関数ではないので適用できません`, span);
+    }
     default:
       fail(`${describe(fn)} は関数ではないので適用できません`, span);
   }

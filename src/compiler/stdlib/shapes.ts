@@ -1,6 +1,6 @@
 // 2D/3D 形状 + warp 族 + 形状合成(元 stdlib.ts 860-1186行)。
 
-import { asNum, asVec, call, constF, constVec, fail, liftDist, mixValue, num, toField, toShape, vecV } from "../ops.ts";
+import { asNum, asVec, call, constF, constVec, fail, liftDist, mixValue, num, outlineShape, toField, toShape, vecV } from "../ops.ts";
 import { fnv1a, vecType } from "../ir.ts";
 import type { Dim, VShape } from "../value.ts";
 import { bi, binIR, defaultColour, rec, shape, warpValue } from "./shared.ts";
@@ -412,21 +412,7 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("outline", 2, (ctx, [w, x], span) => {
       const wn = asNum(w, span);
       const sh = toShape(ctx, x, span);
-      return liftDist(
-        sh,
-        (c, p, s) => {
-          const d = call(c, "abs", [sh.dist(c, p, s).ir], "f32");
-          return num(binIR(c, "-", d, wn.ir, "f32"));
-        },
-        {
-          // outline は abs(d)-w で「点」を帯に太らせるので、sprite(塗りつぶし円板の
-          // instanced 描画)の前提と食い違う —— 明示的に落とす。line/bezier の
-          // strip2D/strip3D(ADR-0016/0036)だけは幅を更新しつつ引き継ぐ
-          sprite: undefined,
-          strip2D: sh.strip2D ? { ...sh.strip2D, width: wn } : undefined,
-          strip3D: sh.strip3D ? { ...sh.strip3D, width: wn } : undefined,
-        },
-      );
+      return outlineShape(ctx, sh, wn, span);
     }),
   );
 }

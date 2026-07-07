@@ -194,6 +194,33 @@ test("line/bezier 単体は outline/fill/glow だけなら dist に触れずコ�
   assert.ok(r.program!.passes.some((p) => p.kind === "strip"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
 });
 
+test("line a b w は line a b |> outline w と同じ意味になる(ADR-0038)", () => {
+  const withW = compile(`out (line [0, 0] [0.3, 0.3] 0.02 |> fill white)`);
+  assert.equal(withW.diagnostics.length, 0, JSON.stringify(withW.diagnostics));
+  assert.ok(withW.program);
+  assert.ok(withW.program!.passes.some((p) => p.kind === "strip"), JSON.stringify(withW.program!.passes.map((p) => p.kind)));
+});
+
+test("bezier a b c w も同じ糖衣構文になる(ADR-0038)", () => {
+  const r = compile(`out (bezier [0, 0] [0.2, 0.5] [0.4, 0] 0.03 |> fill white)`);
+  assert.equal(r.diagnostics.length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(r.program!.passes.some((p) => p.kind === "strip"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
+});
+
+test("3D line a b w も strip3d に昇格する(ADR-0038)", () => {
+  const r = compile(`out (render (orbit 4 0) (line [0, 0, 0] [0.3, 0.3, 0.3] 0.02 |> fill white))`);
+  assert.equal(r.diagnostics.length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(r.program!.passes.some((p) => p.kind === "strip3d"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
+});
+
+test("line/bezier 以外の Shape に数値を適用するとコンパイルエラーになる", () => {
+  const r = compile(`out (circle 0.3 0.05)`);
+  assert.ok(r.diagnostics.some((d) => d.severity === "error" && /は関数ではないので適用できません/.test(d.message)), JSON.stringify(r.diagnostics));
+  assert.equal(r.program, null);
+});
+
 test("glitch は image パスにコンパイルされる", () => {
   const r = compile(`out (circle 0.3 |> fill white |> glitch 0.5)`);
   assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));

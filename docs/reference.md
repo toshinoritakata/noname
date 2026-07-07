@@ -140,8 +140,8 @@ Cam, Dur(時間リテラルの型)
 | `box s` | `Vec d -> Shape d` | 軸並行な箱。`s` は半径ベクトル(2Dなら vec2, 3Dなら vec3)。スカラーも可(正方形/立方体) |
 | `tri r` | `Float -> Shape2` | 正三角形(外接半径 `r`) |
 | `point r` | `Float -> Shape d` | 点(円/球と同じ距離式。`scatter` でのインスタンス化検出の起点。ADR-0014) |
-| `line a b` | `Vec d -> Vec d -> Shape d` | 2点間の線分。**SDFを持たない**(ADR-0037)。`outline w`(太さ)/`fill c`(色)/`glow k`(3Dのみ)/`scatter` としか組み合わせられない — instanced描画専用のプリミティブで、単体使用でもインスタンス数1のバッチとして描画される(2D: 三角形ストリップ、ADR-0016。3D: カメラ向きビルボード、深度テストなし、ADR-0036)。`move`/`rot`/`scale`/`warp`/`distort`/`cut`/`inter`/`<+>`/`if`/`morph` と組み合わせるとコンパイルエラーになる |
-| `bezier a b c` | `Vec d -> Vec d -> Vec d -> Shape d` | 2次ベジエ曲線。制約・instanced描画の条件は `line` と同じ(ADR-0037) |
+| `line a b` / `line a b w` | `Vec d -> Vec d -> Shape d`(`w`付きは `Vec d -> Vec d -> Float -> Shape d`) | 2点間の線分。**SDFを持たない**(ADR-0037)。`outline w`(太さ)/`fill c`(色)/`glow k`(3Dのみ)/`scatter` としか組み合わせられない — instanced描画専用のプリミティブで、単体使用でもインスタンス数1のバッチとして描画される(2D: 三角形ストリップ、ADR-0016。3D: カメラ向きビルボード、深度テストなし、ADR-0036)。`move`/`rot`/`scale`/`warp`/`distort`/`cut`/`inter`/`<+>`/`if`/`morph` と組み合わせるとコンパイルエラーになる。`w` を直接渡すと `\|> outline w` と全く同じ意味になる(糖衣構文、ADR-0038) |
+| `bezier a b c` / `bezier a b c w` | `Vec d -> Vec d -> Vec d -> Shape d`(同上) | 2次ベジエ曲線。制約・instanced描画の条件・`w` の意味は `line` と同じ(ADR-0037/0038) |
 | `plane.x h` / `.y h` / `.z h` | `Float -> Shape3` | 軸に垂直な無限平面(`plane` はレコード) |
 | `heightfield f` | `(Vec2 -> Float) -> Shape3` | 高さ場から3D SDFを作る(`f p` が p での高さ)。Lipschitz安全係数0.6を内蔵 |
 | `stripes n` | `Float -> Field2 Float` | 縦縞パターン(0..1)。図形ではなく場 |

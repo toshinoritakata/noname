@@ -539,6 +539,29 @@ export function liftDist(
   };
 }
 
+/**
+ * `outline w x` の実体。line/bezier の strip2D/strip3D は幅を更新しつつ引き継ぐ。
+ * `stdlib/shapes.ts` の `outline` ビルトインと、line/bezier が返す Shape に数値を
+ * 直接適用したとき(`line a b w`、ADR-0038)の両方から呼ばれる共通実装
+ */
+export function outlineShape(ctx: Ctx, sh: VShape, wn: VNum, span: Span): VShape {
+  return liftDist(
+    sh,
+    (c, p, s) => {
+      const d = call(c, "abs", [sh.dist(c, p, s).ir], "f32");
+      return num(c.arena.node({ k: "bin", op: "-", a: d, b: wn.ir, t: "f32" }));
+    },
+    {
+      // outline は abs(d)-w で「点」を帯に太らせるので、sprite(塗りつぶし円板の
+      // instanced 描画)の前提と食い違う —— 明示的に落とす。line/bezier の
+      // strip2D/strip3D(ADR-0016/0036)だけは幅を更新しつつ引き継ぐ
+      sprite: undefined,
+      strip2D: sh.strip2D ? { ...sh.strip2D, width: wn } : undefined,
+      strip3D: sh.strip3D ? { ...sh.strip3D, width: wn } : undefined,
+    },
+  );
+}
+
 export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
   const dim = unifyDim(a.dim, b.dim, span);
   // スプライト/ストリップバッチ(scatter の instanced 描画。ADR-0014/0016)は合成後も

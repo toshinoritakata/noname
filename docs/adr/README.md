@@ -54,6 +54,7 @@
 - [0035](0035-scatter-instancing-fallback-warning.md) — `scatter` が instanced 描画に昇格し損ねたら warning 診断を出す(見た目を変えずにO(n)ループへ無警告で転落していた「見えない性能崖」の可視化)
 - [0036](0036-3d-line-bezier-strip-instancing.md) — 3D の line/bezier を sprite と同じ深度テストなしビルボード(カメラ向きリボン)で instanced 描画する(2D限定だったADR-0016を3Dに拡張)
 - [0037](0037-line-bezier-sdf-fully-removed.md) — line/bezier のSDFを完全に廃止し、instanced描画(strip2D/strip3D)専用にする(ADR-0015を撤回。単体使用も含めて move/cut/inter/<+>/if/morph 等との合成はコンパイルエラーになる)
+- [0038](0038-line-bezier-width-application-sugar.md) — `line a b w` は Shape への数値適用として `outline` の糖衣構文にする(固定arityのカリー化では第3引数を追加できないため、確定済みShapeへの追加適用として実現)
 
 ## 未決(ADR 化待ち)
 

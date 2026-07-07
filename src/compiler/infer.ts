@@ -547,6 +547,15 @@ export function inferProgram(ast: Program, _src: string): Diagnostic[] {
           if (ra.t === "var") inf.unify(argTy, { t: "vec", n: rf.d });
           return rf.a;
         }
+        // line/bezier(strip2D/strip3D持ち)への Float 適用は outline と同じ意味に
+        // なる(`line a b w`、ADR-0038)。infer はどの Shape が strip 持ちかを
+        // 追跡しない best-effort 層なので、ここでは形だけ許可し、対象外の Shape
+        // (circle 等)への誤用は staging 側の実行時チェックに委ねる
+        if (rf.t === "shape") {
+          const ra = inf.resolve(argTy);
+          if (ra.t === "var") inf.unify(argTy, FLOAT);
+          return rf;
+        }
         if (!inf.unify(fnTy, { t: "fun", a: argTy, b: resTy })) {
           const rff = inf.resolve(fnTy);
           if (rff.t === "fun") {
