@@ -1172,7 +1172,7 @@ ${scope.lines.join("\n")}
           textures: cg2.usedTex,
           dataKey,
           dataCount: batch.count,
-          hash: fnv1a("sprite-data:" + arena.structuralHash([batch.centerRadiusIR, batch.colourIR]) + ":" + inputs.join(",")),
+          hash: fnv1a("sprite-data:" + batch.count + ":" + arena.structuralHash([batch.centerRadiusIR, batch.colourIR]) + ":" + inputs.join(",")),
           lineSpans: [],
         });
       }
@@ -1241,7 +1241,7 @@ fn fs_main(in: SpriteVOut) -> @location(0) vec4f {
           textures: cg3.usedTex,
           spriteRmId: rm.id,
           spriteCount: batch.count,
-          hash: fnv1a("sprite:" + batch.loopId + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
+          hash: fnv1a("sprite:" + batch.loopId + ":" + batch.count + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
           lineSpans: [],
         });
       }
@@ -1296,7 +1296,7 @@ ${scope.lines.join("\n")}
           dataKey,
           dataCount: batch.count,
           hash: fnv1a(
-            "strip3-data:" + arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]) + ":" + inputs.join(","),
+            "strip3-data:" + batch.count + ":" + arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]) + ":" + inputs.join(","),
           ),
           lineSpans: [],
         });
@@ -1382,7 +1382,7 @@ fn fs_main(in: Strip3VOut) -> @location(0) vec4f {
           strip3RmId: rm.id,
           strip3Count: batch.count,
           strip3VertexCount: 2 * (segs + 1),
-          hash: fnv1a("strip3:" + batch.loopId + ":" + segs + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
+          hash: fnv1a("strip3:" + batch.loopId + ":" + batch.count + ":" + segs + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
           lineSpans: [],
         });
       }
@@ -1612,7 +1612,7 @@ ${scope.lines.join("\n")}
         textures: cg2.usedTex,
         dataKey,
         dataCount: batch.count,
-        hash: fnv1a("strip-data:" + arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]) + ":" + inputs.join(",")),
+        hash: fnv1a("strip-data:" + batch.count + ":" + arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]) + ":" + inputs.join(",")),
         lineSpans: [],
       });
     }
@@ -1668,7 +1668,7 @@ fn fs_main(in: StripVOut) -> @location(0) vec4f {
         textures: cg3.usedTex,
         stripCount: batch.count,
         stripVertexCount: 2 * (segs + 1),
-        hash: fnv1a("strip:" + batch.loopId + ":" + segs + ":" + inputs.join(",")),
+        hash: fnv1a("strip:" + batch.loopId + ":" + batch.count + ":" + segs + ":" + inputs.join(",")),
         lineSpans: [],
       });
     }

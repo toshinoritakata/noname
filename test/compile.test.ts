@@ -40,6 +40,31 @@ test("グリッド数の変更は構造変更(構造定数)", () => {
   assert.notEqual(a.program!.programHash, b.program!.programHash);
 });
 
+test("scatter数の変更はinstanced描画(sprite/strip)でも構造変更になる(ADR-0041)", () => {
+  // sprite/strip/strip3d の instanced 描画バッチは、N が変わっても IR の式グラフ
+  // 自体は同じ(loopi 経由の同じ式を N 回描くだけ)なので、パスのハッシュ計算に
+  // batch.count を明示的に含めないと「形が同じ」と誤判定され、uniform 更新のみの
+  // 高速経路(ADR-0008)に落ちて N の変更が一切反映されなくなるバグがあった
+  const spriteA = compile(`out (scatter 5 \\i -> point 0.02 |> move [hash i, hash (i+1)] |> fill white)`);
+  const spriteB = compile(`out (scatter 50 \\i -> point 0.02 |> move [hash i, hash (i+1)] |> fill white)`);
+  assert.ok(spriteA.program && spriteB.program);
+  assert.notEqual(spriteA.program!.programHash, spriteB.program!.programHash, "sprite: N変更でハッシュ不変");
+
+  const stripA = compile(`out (scatter 5 \\i -> line [hash i, hash (i+1)] [hash (i+2), hash (i+3)] |> outline 0.01 |> fill white)`);
+  const stripB = compile(`out (scatter 50 \\i -> line [hash i, hash (i+1)] [hash (i+2), hash (i+3)] |> outline 0.01 |> fill white)`);
+  assert.ok(stripA.program && stripB.program);
+  assert.notEqual(stripA.program!.programHash, stripB.program!.programHash, "strip: N変更でハッシュ不変");
+
+  const strip3A = compile(
+    `out (render (orbit 4 0) (scatter 5 \\i -> line [hash i, hash (i+1), hash (i+2)] [hash (i+3), hash (i+4), hash (i+5)] |> outline 0.01 |> fill white))`,
+  );
+  const strip3B = compile(
+    `out (render (orbit 4 0) (scatter 50 \\i -> line [hash i, hash (i+1), hash (i+2)] [hash (i+3), hash (i+4), hash (i+5)] |> outline 0.01 |> fill white))`,
+  );
+  assert.ok(strip3A.program && strip3B.program);
+  assert.notEqual(strip3A.program!.programHash, strip3B.program!.programHash, "strip3d: N変更でハッシュ不変");
+});
+
 test("エラー時は program が null(ADR-0010 のための前提)", () => {
   const r = compile(`out (circle (0.3`);
   assert.ok(r.diagnostics.some((d) => d.severity === "error"));
