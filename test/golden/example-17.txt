@@ -1,0 +1,2 @@
+== image
+vec4(vec4((vec4(hsv2rgb(vec3((u4(0.55) + (osc.f1 * u6(0.4))), u10(0.7), u11(1))), #1).xyz * (#1 + ((u7(0.3) + (osc.f2 * u9(1.2))) * #2.5))), vec4(hsv2rgb(vec3((u4(0.55) + (osc.f1 * u6(0.4))), u10(0.7), u11(1))), #1).w).xyz, (smoothstep(px, (neg px), (length(p) - ((u0(0.25) + (u1(0.1) * sin(time))) + (osc.f0 * u3(0.3))))) * vec4((vec4(hsv2rgb(vec3((u4(0.55) + (osc.f1 * u6(0.4))), u10(0.7), u11(1))), #1).xyz * (#1 + ((u7(0.3) + (osc.f2 * u9(1.2))) * #2.5))), vec4(hsv2rgb(vec3((u4(0.55) + (osc.f1 * u6(0.4))), u10(0.7), u11(1))), #1).w).w))

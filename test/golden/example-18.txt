@@ -1,0 +1,2 @@
+== image
+vignetteFn(vec4(sample[cam](worldToUv(abs(((p * (#1 + u1(0.04))) / u2(1.3))))).x, sample[cam](worldToUv(abs((p / u2(1.3))))).y, sample[cam](worldToUv(abs(((p * (#1 - u1(0.04))) / u2(1.3))))).z, sample[cam](worldToUv(abs((p / u2(1.3))))).w), p, u0(0.35))

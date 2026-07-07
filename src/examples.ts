@@ -246,4 +246,26 @@ pat = grid [40, 24] \\i ->
 
 out pat`,
   },
+  {
+    name: "17. OSCフェーダー (osc.f)",
+    source: `-- bridge/(ADR-0029)を起動し、TouchOSC等から /1/fader0 等を送ると
+-- 半径・色相・グロウが操作できる(未接続時は osc.f が全て0なので
+-- 時間だけで動く見た目になる)
+r = 0.25 + 0.1 * sin time + osc.f 0 * 0.3
+hue = 0.55 + osc.f 1 * 0.4
+
+out (circle r
+     |> fill (hsv hue 0.7 1)
+     |> glow (0.3 + osc.f 2 * 1.2))`,
+  },
+  {
+    name: "18. Webカメラ万華鏡 (webcam)",
+    source: `-- カメラ許可が必要(ADR-0030)。実カメラの代わりに Chrome の
+-- --use-fake-device-for-media-stream でも確認できる
+out (webcam
+     |> mirror
+     |> zoom 1.3
+     |> chromatic 0.04
+     |> vignette 0.35)`,
+  },
 ];
