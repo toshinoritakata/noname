@@ -1,6 +1,6 @@
 // 2D/3D 形状 + warp 族 + 形状合成(元 stdlib.ts 860-1186行)。
 
-import { asNum, asVec, call, constF, constVec, fail, liftDist, mixValue, num, outlineShape, toField, toShape, vecV } from "../ops.ts";
+import { asNum, asVec, call, constF, constVec, fail, liftDist, mergeShapeBatches, mixValue, num, outlineShape, toField, toShape, vecV } from "../ops.ts";
 import { fnv1a, vecType } from "../ir.ts";
 import type { Dim, VShape } from "../value.ts";
 import { bi, binIR, defaultColour, rec, shape, warpValue } from "./shared.ts";
@@ -319,13 +319,9 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("cut", 2, (ctx, [tool, base], span) => {
       const a = toShape(ctx, base, span);
       const b = toShape(ctx, tool, span);
-      // spriteBatches/stripBatches/strip3Batches(集約後)は shapeUnion と同じ理由で
-      // 無条件で継承する(max による CSG は「実体のある側」の dist=+∞ をそのまま
-      // 素通しするので安全)。sprite/strip2D/strip3D は2項combinatorで意味が壊れる
-      // ため明示的に落とす
-      const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
-      const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
-      const strip3Batches = [...(a.strip3Batches ?? []), ...(b.strip3Batches ?? [])];
+      // 集約後バッチは無条件で継承(shapeUnion と同じ理由。max の CSG も「実体のある側」の
+      // dist=+∞ をそのまま素通しするので安全)。集約前の sprite/strip2D/strip3D は2項
+      // combinator で意味が壊れるため、mergeShapeBatches に含めず=引き継がない
       return {
         v: "shape",
         dim: a.dim === 0 ? b.dim : a.dim,
@@ -334,12 +330,7 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
           return num(call(c, "max", [a.dist(c, p, s).ir, nb], "f32"));
         },
         colour: a.colour,
-        sprite: undefined,
-        strip2D: undefined,
-        strip3D: undefined,
-        spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
-        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
-        strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
+        ...mergeShapeBatches(a, b),
       } as VShape;
     }),
   );
@@ -348,20 +339,13 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("inter", 2, (ctx, [x, y], span) => {
       const a = toShape(ctx, x, span);
       const b = toShape(ctx, y, span);
-      const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
-      const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
-      const strip3Batches = [...(a.strip3Batches ?? []), ...(b.strip3Batches ?? [])];
+      // cut と同じく集約後バッチのみ継承、集約前マーカーは引き継がない(mergeShapeBatches)
       return {
         v: "shape",
         dim: a.dim === 0 ? b.dim : a.dim,
         dist: (c, p, s) => num(call(c, "max", [a.dist(c, p, s).ir, b.dist(c, p, s).ir], "f32")),
         colour: a.colour,
-        sprite: undefined,
-        strip2D: undefined,
-        strip3D: undefined,
-        spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
-        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
-        strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
+        ...mergeShapeBatches(a, b),
       } as VShape;
     }),
   );

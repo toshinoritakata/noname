@@ -374,15 +374,13 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
     const fa = a.v === "field" || a.v === "sim" ? toField(ctx, a, span) : null;
     const fb = b.v === "field" || b.v === "sim" ? toField(ctx, b, span) : null;
     const dim = unifyDim(unifyDim(fc ? fc.dim : 0, fa ? fa.dim : 0, span), fb ? fb.dim : 0, span);
-    // stripBatches(scatter 集約後の instanced 描画バッチ)は選ばれなかった側の分も
-    // 無条件で引き継ぐ。dist が無いためフォールバック手段がなく、落とすと消える
-    const stripBatches = [...(fa?.stripBatches ?? []), ...(fb?.stripBatches ?? [])];
     return {
       v: "field",
       dim,
       fn: (c, p, s) =>
         selectValue(c, fc ? fc.fn(c, p, s) : cond, fa ? fa.fn(c, p, s) : a, fb ? fb.fn(c, p, s) : b, s),
-      stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+      // stripBatches は選ばれなかった側の分も無条件で継承(dist が無くフォールバック不能)
+      stripBatches: concatBatch(fa?.stripBatches, fb?.stripBatches),
     } as VField;
   }
   if (cond.v !== "bool") fail(`if の条件は真偽値が必要ですが、${describe(cond)} です`, span);
@@ -393,12 +391,11 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
       const fx = toField(ctx, x, span);
       const fy = toField(ctx, y, span);
       const dim = unifyDim(fx.dim, fy.dim, span);
-      const stripBatches = [...(fx.stripBatches ?? []), ...(fy.stripBatches ?? [])];
       return {
         v: "field",
         dim,
         fn: (cc, p, s) => selectValue(cc, boolV(c), fx.fn(cc, p, s), fy.fn(cc, p, s), s),
-        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+        stripBatches: concatBatch(fx.stripBatches, fy.stripBatches),
       } as VField;
     }
     if (x.v === "num" && y.v === "num") {
@@ -423,12 +420,8 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
       const dim = unifyDim(x.dim, y.dim, span);
       const xs = x;
       const ys = y;
-      // spriteBatches/stripBatches/strip3Batches(集約後)はどちらの枝が選ばれても
-      // 無条件で引き継ぐ(shapeUnion と同じ理由)。sprite/strip2D/strip3D(集約前の
-      // 単項マーカー)は二項combinatorで意味が壊れるため明示的に落とす(= 安全に SDF フォールバック)
-      const spriteBatches = [...(xs.spriteBatches ?? []), ...(ys.spriteBatches ?? [])];
-      const stripBatches = [...(xs.stripBatches ?? []), ...(ys.stripBatches ?? [])];
-      const strip3Batches = [...(xs.strip3Batches ?? []), ...(ys.strip3Batches ?? [])];
+      // 集約後バッチのみ無条件継承(shapeUnion と同じ理由)。集約前の単項マーカーは
+      // 二項combinatorで意味が壊れるため mergeShapeBatches に含めず=引き継がない
       return {
         v: "shape",
         dim,
@@ -436,12 +429,7 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
           num(cx.arena.node({ k: "select", c, a: xs.dist(cx, p, s).ir, b: ys.dist(cx, p, s).ir, t: "f32" })),
         colour: (cx, p, s) =>
           vecV(4, cx.arena.node({ k: "select", c, a: xs.colour(cx, p, s).ir, b: ys.colour(cx, p, s).ir, t: "vec4" })),
-        sprite: undefined,
-        strip2D: undefined,
-        strip3D: undefined,
-        spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
-        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
-        strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
+        ...mergeShapeBatches(xs, ys),
       } as VShape;
     }
     fail(`then と else の型が合いません: ${describe(x)} と ${describe(y)}`, span);
@@ -455,23 +443,18 @@ export function mixValue(ctx: Ctx, a: Value, b: Value, t: VNum, span: Span): Val
     const fa = toField(ctx, a, span);
     const fb = toField(ctx, b, span);
     const dim = unifyDim(fa.dim, fb.dim, span);
-    const stripBatches = [...(fa.stripBatches ?? []), ...(fb.stripBatches ?? [])];
     return {
       v: "field",
       dim,
       fn: (c, p, s) => mixValue(c, fa.fn(c, p, s), fb.fn(c, p, s), t, s),
-      stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+      stripBatches: concatBatch(fa.stripBatches, fb.stripBatches),
     } as VField;
   }
   if (a.v === "shape" && b.v === "shape") {
     const dim = unifyDim(a.dim, b.dim, span);
     const as_ = a;
     const bs = b;
-    // selectValue と同じ理由: spriteBatches/stripBatches/strip3Batches は無条件で引き継ぎ、
-    // sprite/strip2D/strip3D(単項マーカー)は補間で意味が壊れるため明示的に落とす
-    const spriteBatches = [...(as_.spriteBatches ?? []), ...(bs.spriteBatches ?? [])];
-    const stripBatches = [...(as_.stripBatches ?? []), ...(bs.stripBatches ?? [])];
-    const strip3Batches = [...(as_.strip3Batches ?? []), ...(bs.strip3Batches ?? [])];
+    // selectValue と同じ: 集約後バッチのみ無条件継承、集約前の単項マーカーは補間で壊れるため引き継がない
     return {
       v: "shape",
       dim,
@@ -479,12 +462,7 @@ export function mixValue(ctx: Ctx, a: Value, b: Value, t: VNum, span: Span): Val
         num(call(c, "mix", [as_.dist(c, p, s).ir, bs.dist(c, p, s).ir, t.ir], "f32")),
       colour: (c, p, s) =>
         vecV(4, call(c, "mix", [as_.colour(c, p, s).ir, bs.colour(c, p, s).ir, t.ir], "vec4")),
-      sprite: undefined,
-      strip2D: undefined,
-      strip3D: undefined,
-      spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
-      stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
-      strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
+      ...mergeShapeBatches(as_, bs),
     } as VShape;
   }
   if (a.v === "num" && b.v === "num") {
@@ -562,16 +540,55 @@ export function outlineShape(ctx: Ctx, sh: VShape, wn: VNum, span: Span): VShape
   );
 }
 
+// ---- 描画マーカー(instanced sprite/strip)の伝播 --------------------------------
+//
+// 図形は sprite/strip2D/strip3D(集約前の単項マーカー)と spriteBatches/stripBatches/
+// strip3Batches(集約後のバッチ)の2系統のマーカーを運ぶ(value.ts 参照)。これらを
+// どう引き継ぐかは合成子ごとに違うが、「どのチャンネルが存在するか」の集合はここ1箇所
+// に閉じ込める。各 combinator が個別に if 羅列で伝播していたのを集約し、あるチャンネル
+// だけ伝播し損ねる(fill は strip2D を運ぶのに glow は落とす、の類)書き忘れを構造的に防ぐ。
+
+/** null/空を潰しつつ2つのバッチ列を連結する(空なら undefined) */
+export function concatBatch<T>(a: T[] | undefined, b: T[] | undefined): T[] | undefined {
+  const merged = [...(a ?? []), ...(b ?? [])];
+  return merged.length > 0 ? merged : undefined;
+}
+
+/**
+ * 集約後バッチ(sprite/strip/strip3)を2図形からまとめて継承する。これらは持つ側の
+ * dist を定数 +∞ にすり替え済みなので、min/max/select のどの2項合成でも「実体のある側」
+ * が選ばれる。よって無条件連結が唯一の正しい選択で、落とすと該当図形が描画されず消える
+ * (集約前マーカーと違い SDF フォールバックが存在しないため)。union/cut/inter で共用。
+ */
+export function mergeShapeBatches(a: VShape, b: VShape): Pick<VShape, "spriteBatches" | "stripBatches" | "strip3Batches"> {
+  return {
+    spriteBatches: concatBatch(a.spriteBatches, b.spriteBatches),
+    stripBatches: concatBatch(a.stripBatches, b.stripBatches),
+    strip3Batches: concatBatch(a.strip3Batches, b.strip3Batches),
+  };
+}
+
+/** 単項マーカー(sprite/strip2D/strip3D)の名前。追加時はここと recolorMarkers を直せば済む */
+type UnaryMarker = "sprite" | "strip2D" | "strip3D";
+
+/**
+ * 単項マーカーの色を一括で写す(fill/glow のように色だけ座標非依存に変える合成子用)。
+ * recolor は既存の colour(VVec)を新しい colour に変換する純関数。存在するマーカーすべてに
+ * 適用するので「あるチャンネルだけ運び忘れる」ことが起きない。drop に挙げたチャンネルは
+ * (描画未対応などの理由で)明示的に落とす — 省略による暗黙の脱落と区別する。
+ */
+export function recolorMarkers(sh: VShape, recolor: (colour: VVec) => VVec, drop: UnaryMarker[] = []): Pick<VShape, UnaryMarker> {
+  const carry = <M extends { colour: VVec }>(ch: UnaryMarker, m: M | undefined): M | undefined =>
+    m && !drop.includes(ch) ? { ...m, colour: recolor(m.colour) } : undefined;
+  return {
+    sprite: carry("sprite", sh.sprite),
+    strip2D: carry("strip2D", sh.strip2D),
+    strip3D: carry("strip3D", sh.strip3D),
+  };
+}
+
 export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
   const dim = unifyDim(a.dim, b.dim, span);
-  // スプライト/ストリップバッチ(scatter の instanced 描画。ADR-0014/0016)は合成後も
-  // 引き継ぐ。バッチを持つ側の dist は定数 +∞ にすり替え済みなので、通常の min/select
-  // ロジックはそのまま安全に動く(常に「実体のある側」が選ばれる)。この2つは
-  // 「集約後は無条件で継承」が唯一の正しい選択で、落とすと該当図形が描画されず消える
-  // (集約前の sprite/strip2D と違い、dist の SDF フォールバックが存在しないため)
-  const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
-  const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
-  const strip3Batches = [...(a.strip3Batches ?? []), ...(b.strip3Batches ?? [])];
   return {
     v: "shape",
     dim,
@@ -588,15 +605,12 @@ export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
       const cb = b.colour(c, p, s);
       return vecV(4, c.arena.node({ k: "select", c: cond, a: ca.ir, b: cb.ir, t: "vec4" }));
     },
-    spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
-    stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
-    strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
+    ...mergeShapeBatches(a, b),
   };
 }
 
 /** アルファ合成(over)。左が上 */
 export function imageOver(ctx: Ctx, top: VField, bottom: VField, span: Span): VField {
-  const stripBatches = [...(top.stripBatches ?? []), ...(bottom.stripBatches ?? [])];
   return {
     v: "field",
     dim: 2,
@@ -605,7 +619,7 @@ export function imageOver(ctx: Ctx, top: VField, bottom: VField, span: Span): VF
       const ba = asColorValue(c, bottom.fn(c, p, s), s);
       return vecV(4, call(c, "overBlend", [ta.ir, ba.ir], "vec4"));
     },
-    stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+    stripBatches: concatBatch(top.stripBatches, bottom.stripBatches),
   };
 }
 

@@ -2,7 +2,7 @@
 
 import type { Span } from "../diag.ts";
 import type { NodeId } from "../ir.ts";
-import { asColor, asNum, asVec, call, constVec, describe, fail, toField, toShape, vecV } from "../ops.ts";
+import { asColor, asNum, asVec, call, constVec, describe, fail, recolorMarkers, toField, toShape, vecV } from "../ops.ts";
 import type { Ctx, VField, VShape, VVec } from "../value.ts";
 import { bi, binIR, lifted } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
@@ -46,11 +46,8 @@ export function installColor(add: AddFn, addV: AddVFn): void {
         } as VShape;
       }
       const col = asColor(ctx, colV, span);
-      const result = { ...sh, colour: () => col } as VShape;
-      if (sh.sprite) result.sprite = { ...sh.sprite, colour: col };
-      if (sh.strip2D) result.strip2D = { ...sh.strip2D, colour: col };
-      if (sh.strip3D) result.strip3D = { ...sh.strip3D, colour: col };
-      return result;
+      // 定数色は座標非依存なので、存在する単項マーカーすべてに同じ色を積む(recolorMarkers)
+      return { ...sh, colour: () => col, ...recolorMarkers(sh, () => col) } as VShape;
     }),
   );
   addV(
@@ -109,7 +106,15 @@ export function installColor(add: AddFn, addV: AddVFn): void {
       const sh = toShape(ctx, x, span);
       const boostOf = (c: Ctx, kIr: NodeId): NodeId =>
         binIR(c, "+", c.arena.node({ k: "const", v: 1, t: "f32" }), binIR(c, "*", kIr, c.arena.node({ k: "const", v: 2.5, t: "f32" }), "f32"), "f32");
-      const result = {
+      // 明るさ変換は座標非依存なので、単項マーカーの色にも同じ式を積める。
+      // strip2D は2Dストリップの glow 描画が未対応のため明示的に落とす(暗黙の脱落ではない)
+      const brighten = (colour: VVec): VVec => {
+        const boost = boostOf(ctx, kn.ir);
+        const rgb = binIR(ctx, "*", ctx.arena.node({ k: "swiz", a: colour.ir, sel: "xyz", t: "vec3" }), boost, "vec3");
+        const a = ctx.arena.node({ k: "swiz", a: colour.ir, sel: "w", t: "f32" });
+        return vecV(4, ctx.arena.node({ k: "vec", parts: [rgb, a], t: "vec4" }));
+      };
+      return {
         ...sh,
         colour: (c: Ctx, p: VVec, s: Span) => {
           const base = sh.colour(c, p, s);
@@ -119,24 +124,8 @@ export function installColor(add: AddFn, addV: AddVFn): void {
           const a = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
           return vecV(4, c.arena.node({ k: "vec", parts: [brightened, a], t: "vec4" }));
         },
-        strip2D: undefined, // 2Dストリップ描画は未対応(安全に SDF フォールバック)
-        strip3D: undefined,
+        ...recolorMarkers(sh, brighten, ["strip2D"]),
       } as VShape;
-      // glow の明るさ変換は座標に依存しないので、スプライト/3Dストリップの色にも
-      // 同じ式を適用して伝播する(sprite と同じ instanced・深度テストなしの描画のため)
-      if (sh.sprite) {
-        const boost = boostOf(ctx, kn.ir);
-        const rgb = binIR(ctx, "*", ctx.arena.node({ k: "swiz", a: sh.sprite.colour.ir, sel: "xyz", t: "vec3" }), boost, "vec3");
-        const a = ctx.arena.node({ k: "swiz", a: sh.sprite.colour.ir, sel: "w", t: "f32" });
-        result.sprite = { ...sh.sprite, colour: vecV(4, ctx.arena.node({ k: "vec", parts: [rgb, a], t: "vec4" })) };
-      }
-      if (sh.strip3D) {
-        const boost = boostOf(ctx, kn.ir);
-        const rgb = binIR(ctx, "*", ctx.arena.node({ k: "swiz", a: sh.strip3D.colour.ir, sel: "xyz", t: "vec3" }), boost, "vec3");
-        const a = ctx.arena.node({ k: "swiz", a: sh.strip3D.colour.ir, sel: "w", t: "f32" });
-        result.strip3D = { ...sh.strip3D, colour: vecV(4, ctx.arena.node({ k: "vec", parts: [rgb, a], t: "vec4" })) };
-      }
-      return result;
     }),
   );
   addV(
