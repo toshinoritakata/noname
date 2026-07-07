@@ -8,6 +8,8 @@ out (circle (0.3 + 0.1 * sin time) |> fill white) <> 0.5s
 
 ![デモ: 標準ライブラリの図形合成・空間操作・彩色・ポストエフェクトを詰め込んだ1シーン](assets/demo.webp)
 
+**[Live Demo](https://toshinoritakata.github.io/noname/)** — WebGPU対応ブラウザならインストール不要でその場で触れる。
+
 作品を **`(空間座標, 時間) → 色` の純粋関数** として書き、SDF(符号付き距離場)の代数で図形を合成する。書いたコードはブラウザ内で WGSL にコンパイルされ、WebGPU で実行される。コードを書き換えると、直前のプログラムと新しいプログラムを(`<>` でクロスフェード時間を指定すれば)なめらかに混ぜながら差し替わる。
 
 Conal Elliott の Fran(アニメーション=時間の純粋関数)/ Pan(画像=座標の純粋関数)の系譜を継ぎ、Curv(SDF代数はあるがライブ性なし)と Punctual(ライブ性はあるがSDF代数なし)の間を埋める設計。詳しくは [prior-art.md](prior-art.md) を参照。
