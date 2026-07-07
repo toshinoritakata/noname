@@ -1,6 +1,7 @@
 // 場プリミティブ(元 stdlib.ts 829-859行): noise/fbm/curl 系。
 
 import { asNum, asVec, call, num, vecV } from "../ops.ts";
+import type { NodeId } from "../ir.ts";
 import type { VField } from "../value.ts";
 import { bi, binIR, lifted } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
@@ -59,6 +60,71 @@ export function installNoise(add: AddFn, addV: AddVFn): void {
           const s = call(c, "sin", [freq], "f32");
           const half = c.arena.node({ k: "const", v: 0.5, t: "f32" });
           return num(binIR(c, "+", half, binIR(c, "*", half, s, "f32"), "f32"));
+        },
+      } as VField;
+    }),
+  );
+  addV(
+    "checker",
+    bi("checker", 1, (ctx, [sV], span) => {
+      const s = asNum(sV, span);
+      return {
+        v: "field",
+        dim: 0,
+        fn: (c, p) => {
+          const is3 = c.arena.typeOf(p.ir) === "vec3";
+          const cellOf = (sel: "x" | "y" | "z"): NodeId => {
+            const comp = c.arena.node({ k: "swiz", a: p.ir, sel, t: "f32" });
+            return call(c, "floor", [binIR(c, "/", comp, s.ir, "f32")], "f32");
+          };
+          let sum = binIR(c, "+", cellOf("x"), cellOf("y"), "f32");
+          if (is3) sum = binIR(c, "+", sum, cellOf("z"), "f32");
+          const two = c.arena.node({ k: "const", v: 2, t: "f32" });
+          return num(call(c, "fmod", [sum, two], "f32"));
+        },
+      } as VField;
+    }),
+  );
+  addV(
+    "voronoi",
+    bi("voronoi", 1, (ctx, [sV], span) => {
+      const s = asNum(sV, span);
+      return {
+        v: "field",
+        dim: 0,
+        fn: (c, p) => {
+          const is3 = c.arena.typeOf(p.ir) === "vec3";
+          return num(call(c, is3 ? "voronoi3" : "voronoi2", [p.ir, s.ir], "f32"));
+        },
+      } as VField;
+    }),
+  );
+  addV(
+    "brick",
+    bi("brick", 1, (ctx, [sV], span) => {
+      const s = asNum(sV, span);
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c, p) => {
+          // レンガは2:1(幅:高さ)、1段おきに半幅ずらす定番パターン
+          const x = c.arena.node({ k: "swiz", a: p.ir, sel: "x", t: "f32" });
+          const y = c.arena.node({ k: "swiz", a: p.ir, sel: "y", t: "f32" });
+          const half = c.arena.node({ k: "const", v: 0.5, t: "f32" });
+          const two = c.arena.node({ k: "const", v: 2, t: "f32" });
+          const rowH = binIR(c, "*", s.ir, half, "f32");
+          const row = call(c, "floor", [binIR(c, "/", y, rowH, "f32")], "f32");
+          const rowParity = call(c, "fmod", [row, two], "f32");
+          const offset = binIR(c, "*", rowParity, binIR(c, "*", s.ir, half, "f32"), "f32");
+          const xShifted = binIR(c, "+", x, offset, "f32");
+          const xLocal = call(c, "fract", [binIR(c, "/", xShifted, s.ir, "f32")], "f32");
+          const yLocal = call(c, "fract", [binIR(c, "/", y, rowH, "f32")], "f32");
+          const mortar = c.arena.node({ k: "const", v: 0.06, t: "f32" });
+          const inMortarX = call(c, "step", [xLocal, mortar], "f32");
+          const inMortarY = call(c, "step", [yLocal, mortar], "f32");
+          const one = c.arena.node({ k: "const", v: 1, t: "f32" });
+          const inMortar = call(c, "min", [binIR(c, "+", inMortarX, inMortarY, "f32"), one], "f32");
+          return num(binIR(c, "-", one, inMortar, "f32"));
         },
       } as VField;
     }),

@@ -311,4 +311,25 @@ out (pat |> glitch (0.3 + 0.2 * sin (time * 0.7)))`,
 
 out (render (orbit 5 (time * 0.1)) strands)`,
   },
+  {
+    name: "23. プロシージャルテクスチャ (checker/voronoi/brick)",
+    source: `light = sun [1, 1, 1]
+
+a = sphere 0.55
+  |> move [-1.6, 0, -0.6]
+  |> shade light
+  |> fill (checker 0.2)
+
+b = sphere 0.55
+  |> move [0, 0, 0.6]
+  |> shade light
+  |> fill (voronoi 0.2)
+
+c = sphere 0.55
+  |> move [1.6, 0, -0.6]
+  |> shade light
+  |> fill (brick 0.25)
+
+out (render (orbit 6 (time * 0.15)) (a <+> b <+> c))`,
+  },
 ];

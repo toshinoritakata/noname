@@ -59,6 +59,7 @@
 - [0040](0040-scatter-unroll-probes-instancing-first.md) — scatter は unroll するかどうかの前に instanced 描画の判定を行う(ADR-0037後、Nが小さい(unroll閾値以下の)line/bezierのscatterが必ずコンパイルエラーになっていた回帰の修正)
 - [0041](0041-instanced-batch-count-in-pass-hash.md) — instanced描画バッチ(sprite/strip/strip3d)のパスハッシュに count を含める(scatterの要素数を変えても再コンパイルが走らず本数が変わらなかったバグの修正)
 - [0042](0042-per-frame-gpu-encoding-caches.md) — フレームごとのGPUエンコード負荷を削減する(テクスチャビュー・バインドグループのメモ化。「形が同じなら再構築しない」をGPUリソース層にも拡張。bloomアップサンプルのタップ削減は見た目が変わるリスクがあるため見送り)
+- [0043](0043-procedural-texture-fields.md) — 基本的なプロシージャルテクスチャ(checker/voronoi/brick)をネイティブField追加する(FFIは突飛な柄専用のエスケープハッチとして残し、よく使う基本形だけstripes/noiseと同じ流儀で追加)
 
 ## 未決(ADR 化待ち)
 

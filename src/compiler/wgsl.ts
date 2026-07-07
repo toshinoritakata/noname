@@ -160,6 +160,59 @@ const LIB: Record<string, { deps?: string[]; src: string }> = {
   return f32(hashMix(hx ^ hy ^ hz)) * (1.0 / 4294967296.0);
 }`,
   },
+  hash33: {
+    deps: ["hashMix"],
+    src: `fn hash33(p: vec3f) -> vec3f {
+  let hx = hashMix(bitcast<u32>(p.x));
+  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
+  let hz = hashMix(bitcast<u32>(p.z) ^ 0x85ebca6bu);
+  let h0 = hashMix(hx ^ hy ^ hz);
+  let h1 = hashMix(h0 ^ 0x68bc21ebu);
+  let h2 = hashMix(h1 ^ 0xb5297a4du);
+  return vec3f(f32(h0), f32(h1), f32(h2)) * (1.0 / 4294967296.0);
+}`,
+  },
+  // ボロノイ/セルラーノイズ(F1: 最近傍のジッタ格子点までの距離)。近傍 3x3(2D)/
+  // 3x3x3(3D)を総当たりする定数境界ループなので、動的な N のループ機構
+  // (ir.ts の loop ノード)ではなく素の WGSL for でよい
+  voronoi2: {
+    deps: ["hash22"],
+    src: `fn voronoi2(p: vec2f, s: f32) -> f32 {
+  let q = p / max(s, 1e-6);
+  let i = floor(q);
+  let f = fract(q);
+  var minD = 8.0;
+  for (var y = -1; y <= 1; y = y + 1) {
+    for (var x = -1; x <= 1; x = x + 1) {
+      let g = vec2f(f32(x), f32(y));
+      let o = hash22(i + g);
+      let r = g + o - f;
+      minD = min(minD, length(r));
+    }
+  }
+  return clamp(minD, 0.0, 1.0);
+}`,
+  },
+  voronoi3: {
+    deps: ["hash33"],
+    src: `fn voronoi3(p: vec3f, s: f32) -> f32 {
+  let q = p / max(s, 1e-6);
+  let i = floor(q);
+  let f = fract(q);
+  var minD = 8.0;
+  for (var z = -1; z <= 1; z = z + 1) {
+    for (var y = -1; y <= 1; y = y + 1) {
+      for (var x = -1; x <= 1; x = x + 1) {
+        let g = vec3f(f32(x), f32(y), f32(z));
+        let o = hash33(i + g);
+        let r = g + o - f;
+        minD = min(minD, length(r));
+      }
+    }
+  }
+  return clamp(minD, 0.0, 1.0);
+}`,
+  },
   noise2d: {
     deps: ["hash12"],
     src: `fn noise2d(p: vec2f) -> f32 {

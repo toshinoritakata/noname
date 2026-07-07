@@ -145,6 +145,9 @@ Cam, Dur(時間リテラルの型)
 | `plane.x h` / `.y h` / `.z h` | `Float -> Shape3` | 軸に垂直な無限平面(`plane` はレコード) |
 | `heightfield f` | `(Vec2 -> Float) -> Shape3` | 高さ場から3D SDFを作る(`f p` が p での高さ)。Lipschitz安全係数0.6を内蔵 |
 | `stripes n` | `Float -> Field2 Float` | 縦縞パターン(0..1)。図形ではなく場 |
+| `checker s` | `Float -> Field d Float` | チェッカーボード(0/1、セルサイズ `s`)。2D/3D は座標の次元で自動判別(ADR-0043) |
+| `voronoi s` | `Float -> Field d Float` | ボロノイ/セルラーノイズ(最近傍のジッタ格子点までの距離、F1、0..1にクランプ、セルサイズ `s`)。2D/3D自動判別(ADR-0043) |
+| `brick s` | `Float -> Field2 Float` | レンガ目地パターン(0=目地/1=レンガ面、2:1の段違い、セル幅 `s`)。`stripes` と同じくField2専用だが、3D図形にも(xy平面への投影として)使える(ADR-0043) |
 | `text h str` | `Float -> Str -> Shape2` | 文字列 `str`(1行文字列リテラル `"..."`、日本語可)を高さ `h` でラスタライズしたShape。Canvas2Dによる疑似SDF(ビットマップベースなので拡大するとぼやける、ADR-0032) |
 
 ### 4.2 空間操作(warp 族。図形にも場にも効く)
