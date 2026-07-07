@@ -6,7 +6,7 @@ creative coding 向けのライブコーディング言語と、その TypeScrip
 out (circle (0.3 + 0.1 * sin time) |> fill white) <> 0.5s
 ```
 
-![デモ: 標準ライブラリの図形合成・空間操作・彩色・ポストエフェクトを詰め込んだ1シーン](assets/demo.webp)
+![デモ: 上のコード(脈打つ円)をそのまま実行した様子](assets/demo.webp)
 
 **[Live Demo](https://toshinoritakata.github.io/noname/)** — WebGPU対応ブラウザならインストール不要でその場で触れる。
 
