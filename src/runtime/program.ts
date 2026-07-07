@@ -9,9 +9,45 @@ import type { BufferRegistry } from "./registry.ts";
 
 export type TexResolver = (key: string) => GPUTextureView | null;
 
+/**
+ * テクスチャ→ビューのメモ化(パフォーマンス改善、ADR-0042)。同じ GPUTexture に対して
+ * createView() を毎フレーム呼び直すのは無駄なアロケーションでしかない(ビューは
+ * テクスチャが再作成されない限り不変)。WeakMap なのでテクスチャが destroy/GC
+ * された後の参照は残らない。ProgramSlot 所有のテクスチャ(rm/bloom/data/color)と
+ * BufferRegistry 所有のテクスチャ(prev/sim、ping-pong で2つの実体を往復するだけで
+ * 実体そのものは変わらない)の両方に対して安全に使える
+ */
+const viewCache = new WeakMap<GPUTexture, GPUTextureView>();
+export function cachedView(tex: GPUTexture): GPUTextureView {
+  let v = viewCache.get(tex);
+  if (!v) {
+    v = tex.createView();
+    viewCache.set(tex, v);
+  }
+  return v;
+}
+
+/**
+ * cachedView() が返すビューに振る連番。同じテクスチャなら常に同じビュー・同じ番号に
+ * なる(cachedView の1:1性が前提)ので、これを文字列キーに連結すればバインドグループ
+ * キャッシュのキーになる。context.getCurrentTexture() のようにフレームごとに新しい
+ * テクスチャを返すもの(cachedView を通さない生の createView())には使わないこと
+ */
+const viewIds = new WeakMap<GPUTextureView, number>();
+let nextViewId = 0;
+export function viewId(v: GPUTextureView): number {
+  let id = viewIds.get(v);
+  if (id === undefined) {
+    id = nextViewId++;
+    viewIds.set(v, id);
+  }
+  return id;
+}
+
 interface BuiltPass {
   spec: CompiledPass;
   pipeline: GPURenderPipeline;
+  bindGroupLayout: GPUBindGroupLayout;
 }
 
 const PIPELINE_CACHE_LIMIT = 128;
@@ -167,7 +203,8 @@ export class ProgramSlot {
           cache.set(key, p);
         }
         try {
-          return { spec, pipeline: await p };
+          const pipeline = await p;
+          return { spec, pipeline, bindGroupLayout: pipeline.getBindGroupLayout(0) };
         } catch (e) {
           cache.delete(key);
           diags.push({
@@ -328,19 +365,36 @@ export class ProgramSlot {
     if (!this.dummyTex) {
       this.dummyTex = createWorkTexture(this.device, 1, 1, "dummy");
     }
-    return this.dummyTex.createView();
+    return cachedView(this.dummyTex);
   }
 
+  /** pass ごとのバインドグループキャッシュ(ADR-0042)。キーは解決された各テクスチャ
+   * ビューの識別子(viewId、cachedView 経由なので同一テクスチャなら不変)を連結した
+   * 文字列。prev/sim のように ping-pong で実体が2つを往復するパスでも、実体は
+   * 高々2種なのでキャッシュは高々2エントリで済む。ほとんどのパス(raymarch/bloom/
+   * data/image)は解決先が resize まで不変なので、初回以降は毎フレーム bindGroup を
+   * 作り直さずこのキャッシュを返す */
+  private bindGroupCache = new Map<BuiltPass, Map<string, GPUBindGroup>>();
+
   private bindGroup(pass: BuiltPass, resolve: TexResolver): GPUBindGroup {
+    const views = pass.spec.textures.map((key) => resolve(key) ?? this.dummyView());
+    let key = "";
+    for (const v of views) key += viewId(v) + ",";
+    let cache = this.bindGroupCache.get(pass);
+    if (!cache) {
+      cache = new Map();
+      this.bindGroupCache.set(pass, cache);
+    }
+    const hit = cache.get(key);
+    if (hit) return hit;
     const entries: GPUBindGroupEntry[] = [
       { binding: 0, resource: { buffer: this.uniformBuffer } },
       { binding: 1, resource: this.sampler },
     ];
-    pass.spec.textures.forEach((key, i) => {
-      // 明示レイアウトなので全バインディングを埋める(未解決はダミー)
-      entries.push({ binding: i + 2, resource: resolve(key) ?? this.dummyView() });
-    });
-    return this.device.createBindGroup({ layout: pass.pipeline.getBindGroupLayout(0), entries });
+    views.forEach((v, i) => entries.push({ binding: i + 2, resource: v }));
+    const bg = this.device.createBindGroup({ layout: pass.bindGroupLayout, entries });
+    cache.set(key, bg);
+    return bg;
   }
 
   /**
@@ -349,17 +403,29 @@ export class ProgramSlot {
    */
   execute(encoder: GPUCommandEncoder, registry: BufferRegistry, resolveExtra: TexResolver, stepSims: boolean): void {
     const resolve: TexResolver = (key) => {
-      if (key === "prev") return registry.getPrevRead()?.createView() ?? null;
+      if (key === "prev") {
+        const t = registry.getPrevRead();
+        return t ? cachedView(t) : null;
+      }
       const sim = key.match(/^sim:(.+):(\d+)$/);
       if (sim) {
         const entry = registry.getSim(sim[1]);
-        return entry ? entry.read[Number(sim[2])].createView() : null;
+        return entry ? cachedView(entry.read[Number(sim[2])]) : null;
       }
       const rm = key.match(/^rm:(\d+)$/);
-      if (rm) return this.rmTex.get(Number(rm[1]))?.createView() ?? null;
-      if (key.startsWith("bloom:")) return this.bloomTex.get(key)?.createView() ?? null;
+      if (rm) {
+        const t = this.rmTex.get(Number(rm[1]));
+        return t ? cachedView(t) : null;
+      }
+      if (key.startsWith("bloom:")) {
+        const t = this.bloomTex.get(key);
+        return t ? cachedView(t) : null;
+      }
       const data = key.match(/^((?:data|sprite|strip3?):\d+):(\d+)$/);
-      if (data) return this.dataTex.get(data[1])?.[Number(data[2])]?.createView() ?? null;
+      if (data) {
+        const t = this.dataTex.get(data[1])?.[Number(data[2])];
+        return t ? cachedView(t) : null;
+      }
       return resolveExtra(key);
     };
 
@@ -368,7 +434,7 @@ export class ProgramSlot {
       if (p.spec.kind !== "data" || !p.spec.dataKey) continue;
       const texs = this.dataTex.get(p.spec.dataKey);
       if (!texs) continue;
-      this.draw(encoder, p, texs.map((t) => t.createView()), resolve);
+      this.draw(encoder, p, texs.map((t) => cachedView(t)), resolve);
     }
 
     // ---- simulate: init(必要なら)→ update → swap ----
@@ -376,7 +442,7 @@ export class ProgramSlot {
       if (p.spec.kind !== "sim-init") continue;
       const entry = registry.getSim(p.spec.simName!);
       if (!entry || !entry.needsInit) continue;
-      this.runSimPass(encoder, p, entry.write.map((t) => t.createView()), resolve);
+      this.runSimPass(encoder, p, entry.write.map((t) => cachedView(t)), resolve);
       registry.swapSim(p.spec.simName!);
       entry.needsInit = false;
     }
@@ -385,7 +451,7 @@ export class ProgramSlot {
         if (p.spec.kind !== "sim-update") continue;
         const entry = registry.getSim(p.spec.simName!);
         if (!entry) continue;
-        this.runSimPass(encoder, p, entry.write.map((t) => t.createView()), resolve);
+        this.runSimPass(encoder, p, entry.write.map((t) => cachedView(t)), resolve);
         registry.swapSim(p.spec.simName!);
       }
     }
@@ -395,7 +461,7 @@ export class ProgramSlot {
       if (p.spec.kind !== "raymarch") continue;
       const tex = this.rmTex.get(p.spec.rmId!);
       if (!tex) continue;
-      this.draw(encoder, p, [tex.createView()], resolve);
+      this.draw(encoder, p, [cachedView(tex)], resolve);
     }
 
     // ---- sprite(scatter の instanced 描画。レイマーチ結果に加算ブレンドで重ね描き。ADR-0014) ----
@@ -403,7 +469,7 @@ export class ProgramSlot {
       if (p.spec.kind !== "sprite" || p.spec.spriteRmId === undefined) continue;
       const tex = this.rmTex.get(p.spec.spriteRmId);
       if (!tex) continue;
-      this.draw(encoder, p, [tex.createView()], resolve, "load", 6, p.spec.spriteCount ?? 1);
+      this.draw(encoder, p, [cachedView(tex)], resolve, "load", 6, p.spec.spriteCount ?? 1);
     }
 
     // ---- strip3d(3D line/bezier の instanced 描画。sprite と同じくレイマーチ結果に
@@ -412,7 +478,7 @@ export class ProgramSlot {
       if (p.spec.kind !== "strip3d" || p.spec.strip3RmId === undefined || p.spec.strip3VertexCount === undefined) continue;
       const tex = this.rmTex.get(p.spec.strip3RmId);
       if (!tex) continue;
-      this.draw(encoder, p, [tex.createView()], resolve, "load", p.spec.strip3VertexCount, p.spec.strip3Count ?? 1);
+      this.draw(encoder, p, [cachedView(tex)], resolve, "load", p.spec.strip3VertexCount, p.spec.strip3Count ?? 1);
     }
 
     // ---- bloom(ダウンサンプル+ブラー多パス連鎖。ADR-0019) ----
@@ -422,21 +488,21 @@ export class ProgramSlot {
       if (p.spec.kind !== "bloom-extract" && p.spec.kind !== "bloom-down" && p.spec.kind !== "bloom-up") continue;
       const tex = this.bloomTex.get(p.spec.bloomOutKey!);
       if (!tex) continue;
-      this.draw(encoder, p, [tex.createView()], resolve);
+      this.draw(encoder, p, [cachedView(tex)], resolve);
     }
 
     // ---- image(最終) ----
     for (const p of this.passes) {
       if (p.spec.kind !== "image") continue;
       if (!this.colorTex) continue;
-      this.draw(encoder, p, [this.colorTex.createView()], resolve);
+      this.draw(encoder, p, [cachedView(this.colorTex)], resolve);
     }
 
     // ---- strip(line/bezier の instanced 描画。march 不要で最終画像に直接上描き。ADR-0016) ----
     for (const p of this.passes) {
       if (p.spec.kind !== "strip" || p.spec.stripVertexCount === undefined) continue;
       if (!this.colorTex) continue;
-      this.draw(encoder, p, [this.colorTex.createView()], resolve, "load", p.spec.stripVertexCount, p.spec.stripCount ?? 1);
+      this.draw(encoder, p, [cachedView(this.colorTex)], resolve, "load", p.spec.stripVertexCount, p.spec.stripCount ?? 1);
     }
   }
 

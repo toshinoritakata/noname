@@ -6,7 +6,7 @@ import type { Diagnostic } from "../compiler/diag.ts";
 import type { Gpu } from "./gpu.ts";
 import { WORK_FORMAT } from "./gpu.ts";
 import { Clock, InputEngine } from "./inputs.ts";
-import { PipelineCache, ProgramSlot, TextTextureCache } from "./program.ts";
+import { cachedView, PipelineCache, ProgramSlot, TextTextureCache, viewId } from "./program.ts";
 import { BufferRegistry } from "./registry.ts";
 import { CompilerClient } from "./compiler-client.ts";
 
@@ -33,6 +33,11 @@ export class Renderer {
   private blendPipeline: GPURenderPipeline | null = null;
   private blendPipelineCanvas: GPURenderPipeline | null = null;
   private blendBuf: GPUBuffer;
+  /** 毎フレーム writeBuffer するだけの一時バッファ。都度 new する必要はない(ADR-0042) */
+  private kBuf = new Float32Array(4);
+  /** prev への書き戻し(blendTo)用のバインドグループキャッシュ。canvas への書き戻しは
+   * 毎フレーム新しいテクスチャ(context.getCurrentTexture())が来るため対象外 */
+  private prevBlendGroupCache = new Map<string, GPUBindGroup>();
   private compiler = new CompilerClient();
   onStatus: ((s: string) => void) | null = null;
   onFps: ((fps: number) => void) | null = null;
@@ -195,10 +200,16 @@ export class Renderer {
     }
 
     const resolveExtra = (key: string): GPUTextureView | null => {
-      if (key === "fft") return this.inputs.fftTexture?.createView() ?? null;
-      if (key === "cam") return this.inputs.camTexture?.createView() ?? null;
-      if (key.startsWith("text:")) return this.textCache.get(key)?.texture.createView() ?? null;
-      if (key.startsWith("ent:")) return this.inputs.adapterTexture(key)?.createView() ?? null;
+      if (key === "fft") return this.inputs.fftTexture ? cachedView(this.inputs.fftTexture) : null;
+      if (key === "cam") return this.inputs.camTexture ? cachedView(this.inputs.camTexture) : null;
+      if (key.startsWith("text:")) {
+        const t = this.textCache.get(key)?.texture;
+        return t ? cachedView(t) : null;
+      }
+      if (key.startsWith("ent:")) {
+        const t = this.inputs.adapterTexture(key);
+        return t ? cachedView(t) : null;
+      }
       return null;
     };
 
@@ -214,37 +225,44 @@ export class Renderer {
 
     // ---- blend: 画面へ、そして prev へ書き戻す(ADR-0004: フェード中も一貫した前フレーム) ----
     this.ensureBlendPipelines();
-    const kBuf = new Float32Array([this.old ? k : 1, 0, 0, 0]);
-    device.queue.writeBuffer(this.blendBuf, 0, kBuf.buffer);
-    const texA = (this.old ?? this.active).colorTex!;
-    const texB = this.active.colorTex!;
+    this.kBuf[0] = this.old ? k : 1;
+    device.queue.writeBuffer(this.blendBuf, 0, this.kBuf.buffer);
+    const texA = cachedView((this.old ?? this.active).colorTex!);
+    const texB = cachedView(this.active.colorTex!);
 
-    const blendTo = (view: GPUTextureView, pipeline: GPURenderPipeline): void => {
+    const blendTo = (view: GPUTextureView, pipeline: GPURenderPipeline, cacheKey: string | null): void => {
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view, loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 1 } }],
       });
       pass.setPipeline(pipeline);
-      pass.setBindGroup(
-        0,
-        device.createBindGroup({
+      // canvas への書き戻し(cacheKey===null)は context.getCurrentTexture() が毎フレーム
+      // 新しいテクスチャを返すのでキャッシュできない。prev への書き戻しは実体が2つの
+      // ping-pong バッファを往復するだけなので、texA/texB/targetの組み合わせが同じ間は
+      // バインドグループを再利用できる(ADR-0042)
+      let bg: GPUBindGroup | undefined = cacheKey ? this.prevBlendGroupCache.get(cacheKey) : undefined;
+      if (!bg) {
+        bg = device.createBindGroup({
           layout: pipeline.getBindGroupLayout(0),
           entries: [
             { binding: 0, resource: { buffer: this.blendBuf } },
             { binding: 1, resource: this.active!.sampler },
-            { binding: 2, resource: texA.createView() },
-            { binding: 3, resource: texB.createView() },
+            { binding: 2, resource: texA },
+            { binding: 3, resource: texB },
           ],
-        }),
-      );
+        });
+        if (cacheKey) this.prevBlendGroupCache.set(cacheKey, bg);
+      }
+      pass.setBindGroup(0, bg);
       pass.draw(3);
       pass.end();
     };
 
-    blendTo(context.getCurrentTexture().createView(), this.blendPipelineCanvas!);
+    blendTo(context.getCurrentTexture().createView(), this.blendPipelineCanvas!, null);
     if (needsPrev) {
       const prevW = this.registry.getPrevWrite();
       if (prevW) {
-        blendTo(prevW.createView(), this.blendPipeline!);
+        const key = `${viewId(cachedView(prevW))}:${viewId(texA)}:${viewId(texB)}`;
+        blendTo(cachedView(prevW), this.blendPipeline!, key);
       }
     }
 
