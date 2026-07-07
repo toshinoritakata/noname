@@ -74,6 +74,23 @@ test("http.value は入力参照にコンパイルされる(ADR-0031)", () => {
   assert.ok(r.program!.uniformLayout.inputs.includes("http.value"));
 });
 
+test("text は文字列リテラルを受け取り、text:<hash>:aspect 入力とtextTexturesを持つ(ADR-0032)", () => {
+  const r = compile(`out (text 0.3 "Hello" |> fill white)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.equal(r.program!.textTextures.length, 1);
+  assert.equal(r.program!.textTextures[0].text, "Hello");
+  const aspectInput = r.program!.uniformLayout.inputs.find((n) => n.endsWith(":aspect"));
+  assert.ok(aspectInput, JSON.stringify(r.program!.uniformLayout.inputs));
+  assert.equal(aspectInput, `${r.program!.textTextures[0].key}:aspect`);
+});
+
+test("同じ文字列を複数回使っても textTextures は重複しない", () => {
+  const r = compile(`out (text 0.3 "Hi" <+> (text 0.3 "Hi" |> move [0.5, 0]))`);
+  assert.ok(r.program);
+  assert.equal(r.program!.textTextures.length, 1);
+});
+
 test("大きな scatter は WGSL の for ループになる", () => {
   const r = compile(`out (scatter 300 \\i -> circle 0.01 |> move [hash i * 2 - 1, hash (i+7) * 2 - 1])`);
   assert.ok(r.program, JSON.stringify(r.diagnostics));

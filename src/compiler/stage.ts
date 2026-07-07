@@ -29,6 +29,7 @@ import {
   type RaymarchPassSpec,
   type BloomPassSpec,
   type StripBatchSpec,
+  type TextTextureSpec,
   type Value,
   type VVec,
 } from "./value.ts";
@@ -45,6 +46,7 @@ export interface StagedProgram {
   usesPrev: boolean;
   derivedInputs: { name: string; source: string; kind: "lag"; k: number }[];
   ffiFns: { name: string; src: string; srcHash: string; span: Span }[];
+  textTextures: TextTextureSpec[];
   /** `<> dur` の静的値。null = 即時切替 */
   fade: { value: number; unit: "s" | "beat" } | null;
 }
@@ -70,6 +72,7 @@ export function stageProgram(ast: Program, src: string, glsl?: GlslFrontend): St
     usesPrev: false,
     derivedInputs: [],
     ffiFns: [],
+    textTextures: [],
     timeStack: [],
     freshId: () => idCounter++,
     glsl,
@@ -119,6 +122,7 @@ export function stageProgram(ast: Program, src: string, glsl?: GlslFrontend): St
         usesPrev: ctx.usesPrev,
         derivedInputs: ctx.derivedInputs,
         ffiFns: ctx.ffiFns,
+        textTextures: ctx.textTextures,
         fade,
       },
       diagnostics,
@@ -432,6 +436,7 @@ export function stageShapeDist(
     usesPrev: false,
     derivedInputs: [],
     ffiFns: [],
+    textTextures: [],
     timeStack: [],
     freshId: () => idCounter++,
   };

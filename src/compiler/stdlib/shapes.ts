@@ -1,7 +1,7 @@
 // 2D/3D 形状 + warp 族 + 形状合成(元 stdlib.ts 860-1186行)。
 
 import { asNum, asVec, call, constF, constVec, fail, liftDist, mixValue, num, toField, toShape, vecV } from "../ops.ts";
-import { vecType } from "../ir.ts";
+import { fnv1a, vecType } from "../ir.ts";
 import type { Dim, VShape } from "../value.ts";
 import { bi, binIR, defaultColour, rec, shape, warpValue } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
@@ -102,6 +102,46 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
         sh.strip2D = { p0: a, p1: b, p2: cc, width: constF(ctx, 0), colour: defaultColour(ctx) };
       }
       return sh;
+    }),
+  );
+  addV(
+    "text",
+    bi("text", 2, (ctx, [hV, strV], span) => {
+      const hn = asNum(hV, span);
+      if (strV.v !== "str") fail(`text の2引数目は文字列(\"...\")が必要です`, span);
+      const str = strV.text;
+      // ラスタライズ(Canvas2D→GPUテクスチャ)はメインスレッド側で行う(ADR-0032)。
+      // コンパイラ(Worker)はここで文字列とキーだけを登録する
+      const key = "text:" + fnv1a(str);
+      if (!ctx.textTextures.some((t) => t.key === key)) ctx.textTextures.push({ key, text: str });
+      // 実測アスペクト比(文字列の長さで幅が変わる)はランタイムが毎フレーム供給する
+      // 入力にする(px と同じ扱い)。コンパイラ側は DOM/Canvas2D に一切触れない
+      return shape(2, (c, p) => {
+        const aspect = c.arena.node({ k: "input", name: `${key}:aspect`, t: "f32" });
+        const halfH = hn.ir;
+        const halfW = binIR(c, "*", halfH, aspect, "f32");
+        const halfExtent = c.arena.node({ k: "vec", parts: [halfW, halfH], t: "vec2" });
+        const boxDist = call(c, "sdBox2", [p.ir, halfExtent], "f32");
+        // ローカル座標 p([-halfW,halfW]x[-halfH,halfH]) を uv([0,1]x[0,1]、
+        // canvas は上が原点なので v は反転)に写像してラスタライズ結果をサンプルする
+        const px = c.arena.node({ k: "swiz", a: p.ir, sel: "x", t: "f32" });
+        const py = c.arena.node({ k: "swiz", a: p.ir, sel: "y", t: "f32" });
+        const u = binIR(c, "/", binIR(c, "+", px, halfW, "f32"), binIR(c, "*", halfW, constF(c, 2).ir, "f32"), "f32");
+        const v = binIR(
+          c,
+          "-",
+          constF(c, 1).ir,
+          binIR(c, "/", binIR(c, "+", py, halfH, "f32"), binIR(c, "*", halfH, constF(c, 2).ir, "f32"), "f32"),
+          "f32",
+        );
+        const uv = c.arena.node({ k: "vec", parts: [u, v], t: "vec2" });
+        const texel = c.arena.node({ k: "sample", tex: key, p: uv, t: "vec4" });
+        const alpha = c.arena.node({ k: "swiz", a: texel, sel: "w", t: "f32" });
+        // 真のSDFではない近似(ラスタライズ済みアルファからの疑似distance、Lipschitz規律の対象外)。
+        // 外接矩形の外は sdBox2 が、内側は「文字の塗り具合」が支配するよう max で交差させる
+        const textDist = binIR(c, "-", constF(c, 0.5).ir, alpha, "f32");
+        return num(call(c, "max", [boxDist, textDist], "f32"));
+      });
     }),
   );
   add("plane", (ctx) =>

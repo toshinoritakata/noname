@@ -3,7 +3,8 @@
 // - 時間リテラル `0.5s` `1beat` を一体で読む
 // - 改行は常に NEWLINE トークン(インデント付き)として発行し、括弧内の行結合はパーサが行う
 //   (閉じ忘れ括弧があってもエラー回復で次の文へ進めるようにするため)
-// - `--` は行コメント、`"""..."""` は生文字列(FFI ブロック用)
+// - `--` は行コメント、`"""..."""` は生文字列(FFI ブロック用)、`"..."` は
+//   1行文字列リテラル(`\"` `\\` `\n` のエスケープのみ対応。`text`(ADR-0032)用)
 
 import { CompileError, span, type Span } from "./diag.ts";
 
@@ -158,6 +159,31 @@ export function lex(src: string): Tok[] {
       if (end < 0) throw new CompileError("閉じられていない文字列ブロック(\"\"\" が必要)", span(start, n));
       push({ kind: "str", text: src.slice(i, end), span: span(start, end + 3) });
       i = end + 3;
+      continue;
+    }
+
+    // 1行文字列リテラル "..."(ADR-0032、text 用。生文字列 """...""" とは別トークン種別)
+    if (c === '"') {
+      const start = i;
+      i++;
+      let text = "";
+      while (i < n && src[i] !== '"') {
+        if (src[i] === "\n") throw new CompileError("文字列リテラルの途中で改行しました(\" が閉じていません)", span(start, i));
+        if (src[i] === "\\" && i + 1 < n) {
+          const esc = src[i + 1];
+          if (esc === '"') text += '"';
+          else if (esc === "\\") text += "\\";
+          else if (esc === "n") text += "\n";
+          else throw new CompileError(`文字列内の不明なエスケープ \`\\${esc}\``, span(i, i + 2));
+          i += 2;
+          continue;
+        }
+        text += src[i];
+        i++;
+      }
+      if (i >= n) throw new CompileError('閉じられていない文字列リテラル(" が必要)', span(start, n));
+      i++; // 閉じ "
+      push({ kind: "str", text, span: span(start, i) });
       continue;
     }
 

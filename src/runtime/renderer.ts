@@ -6,7 +6,7 @@ import type { Diagnostic } from "../compiler/diag.ts";
 import type { Gpu } from "./gpu.ts";
 import { WORK_FORMAT } from "./gpu.ts";
 import { Clock, InputEngine } from "./inputs.ts";
-import { PipelineCache, ProgramSlot } from "./program.ts";
+import { PipelineCache, ProgramSlot, TextTextureCache } from "./program.ts";
 import { BufferRegistry } from "./registry.ts";
 import { CompilerClient } from "./compiler-client.ts";
 
@@ -24,6 +24,7 @@ export class Renderer {
   inputs: InputEngine;
   registry: BufferRegistry;
   private cache: PipelineCache = new PipelineCache();
+  private textCache: TextTextureCache;
   private active: ProgramSlot | null = null;
   private old: ProgramSlot | null = null;
   private fadeStart = 0;
@@ -43,6 +44,7 @@ export class Renderer {
     this.gpu = gpu;
     this.inputs = new InputEngine(gpu.device, gpu.canvas);
     this.registry = new BufferRegistry(gpu.device);
+    this.textCache = new TextTextureCache(gpu.device);
     this.blendBuf = gpu.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const loop = (t: number): void => {
       if (this.stopped) return;
@@ -70,6 +72,10 @@ export class Renderer {
     if (!result.program) {
       return { diagnostics: result.diagnostics, outcome: "error", compileMs: performance.now() - t0 };
     }
+
+    // text(ADR-0032)のラスタライズは Canvas2D の同期APIなので await 不要。
+    // fast path でも swap 前でも、参照されているテクスチャが必ず揃っているようにする
+    for (const t of result.program.textTextures) this.textCache.ensure(t.key, t.text);
 
     // ---- 高速経路: 形が同じ → uniform 更新のみ(< 1 フレーム、ADR-0008) ----
     if (this.active && this.active.compiled.programHash === result.program.programHash) {
@@ -154,6 +160,10 @@ export class Renderer {
         case "px":
           return 2 / Math.max(1, Math.min(this.gpu.canvas.width, this.gpu.canvas.height));
         default:
+          if (name.startsWith("text:") && name.endsWith(":aspect")) {
+            const key = name.slice(0, -":aspect".length);
+            return this.textCache.get(key)?.aspect ?? 1;
+          }
           return this.inputs.values.get(name) ?? 0;
       }
     };
@@ -187,6 +197,7 @@ export class Renderer {
     const resolveExtra = (key: string): GPUTextureView | null => {
       if (key === "fft") return this.inputs.fftTexture?.createView() ?? null;
       if (key === "cam") return this.inputs.camTexture?.createView() ?? null;
+      if (key.startsWith("text:")) return this.textCache.get(key)?.texture.createView() ?? null;
       if (key.startsWith("ent:")) return this.inputs.adapterTexture(key)?.createView() ?? null;
       return null;
     };

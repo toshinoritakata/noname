@@ -55,6 +55,69 @@ export class PipelineCache {
   }
 }
 
+const TEXT_CACHE_LIMIT = 64;
+/** ラスタライズの基準高さ(px)。文字の世界座標サイズは Shape 側の `text h str` の h で決まる */
+const TEXT_PIXEL_HEIGHT = 128;
+
+interface TextTextureEntry {
+  texture: GPUTexture;
+  /** 幅/高さ。text の dist 計算がこの比率で外接矩形の幅を決める */
+  aspect: number;
+}
+
+/**
+ * `text`(ADR-0032)のラスタライズ結果(文字列内容→GPUテクスチャ)のキャッシュ。
+ * Canvas2D の fillText は同期APIなので、fetch/getUserMedia と違い await 不要で
+ * 即座にテクスチャを用意できる。PipelineCache と同じ理由(ライブコーディングは
+ * 編集し続けるのが前提)でLRU上限を設ける
+ */
+export class TextTextureCache {
+  private device: GPUDevice;
+  private map = new Map<string, TextTextureEntry>();
+  private limit: number;
+
+  constructor(device: GPUDevice, limit = TEXT_CACHE_LIMIT) {
+    this.device = device;
+    this.limit = limit;
+  }
+
+  /** 未キャッシュならラスタライズしてGPUへアップロードする。同期的に完了する */
+  ensure(key: string, text: string): TextTextureEntry {
+    const existing = this.map.get(key);
+    if (existing) {
+      this.map.delete(key);
+      this.map.set(key, existing); // 参照されたので最新として末尾に移動する(LRU)
+      return existing;
+    }
+    const height = TEXT_PIXEL_HEIGHT;
+    const measure = new OffscreenCanvas(1, 1).getContext("2d")!;
+    measure.font = `${Math.round(height * 0.8)}px sans-serif`;
+    const width = Math.max(1, Math.ceil(measure.measureText(text || " ").width));
+    const canvas = new OffscreenCanvas(width, height);
+    const c2d = canvas.getContext("2d")!;
+    c2d.font = measure.font;
+    c2d.textBaseline = "middle";
+    c2d.fillStyle = "white";
+    c2d.fillText(text, 0, height / 2);
+    const texture = createWorkTexture(this.device, width, height, key);
+    this.device.queue.copyExternalImageToTexture({ source: canvas }, { texture }, { width, height });
+    const entry: TextTextureEntry = { texture, aspect: width / height };
+    this.map.set(key, entry);
+    if (this.map.size > this.limit) {
+      const oldestKey = this.map.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.map.get(oldestKey)?.texture.destroy();
+        this.map.delete(oldestKey);
+      }
+    }
+    return entry;
+  }
+
+  get(key: string): TextTextureEntry | undefined {
+    return this.map.get(key);
+  }
+}
+
 export class ProgramSlot {
   device: GPUDevice;
   compiled: CompiledProgram;

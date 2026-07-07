@@ -271,6 +271,17 @@ export interface FfiFn {
   span: Span;
 }
 
+/**
+ * `text`(ADR-0032)がラスタライズを要求する文字列。実際の描画(Canvas2D→GPUテクスチャ)
+ * は GPU を持つメインスレッド側でのみ行う(コンパイラは Worker で動くため)。
+ * key は "text:" + fnv1a(text) で、sample のテクスチャキーにも
+ * `${key}:aspect` という入力名(実測アスペクト比、ランタイム供給)にも使う
+ */
+export interface TextTextureSpec {
+  key: string;
+  text: string;
+}
+
 export interface Ctx {
   arena: IRArena;
   diags: Diagnostic[];
@@ -285,6 +296,7 @@ export interface Ctx {
   usesPrev: boolean;
   derivedInputs: DerivedInput[];
   ffiFns: FfiFn[];
+  textTextures: TextTextureSpec[];
   /** slow/loop の時間再マップ用スタック。空なら input('time') */
   timeStack: NodeId[];
   freshId: () => number;

@@ -84,6 +84,8 @@ export interface CompiledProgram {
   sims: SimRuntimeSpec[];
   usesPrev: boolean;
   derivedInputs: { name: string; source: string; kind: "lag"; k: number }[];
+  /** `text`(ADR-0032)がラスタライズを要求する文字列。key ごとに重複なし */
+  textTextures: { key: string; text: string }[];
   programHash: string;
 }
 
@@ -1608,6 +1610,14 @@ fn fs_main(in: StripVOut) -> @location(0) vec4f {
     })),
     usesPrev: staged.usesPrev,
     derivedInputs: staged.derivedInputs,
+    textTextures: dedupeTextTextures(staged.textTextures),
     programHash,
   };
+}
+
+/** key(文字列内容のハッシュ)で重複を除く。同じ文字列を複数箇所で使っても1つだけ */
+function dedupeTextTextures(specs: { key: string; text: string }[]): { key: string; text: string }[] {
+  const seen = new Map<string, { key: string; text: string }>();
+  for (const s of specs) if (!seen.has(s.key)) seen.set(s.key, s);
+  return [...seen.values()];
 }

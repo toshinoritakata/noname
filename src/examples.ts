@@ -278,4 +278,11 @@ hue = fract (http.value * 0.001 + time * 0.03)
 out (circle (0.3 + 0.05 * sin time)
      |> fill (hsv hue 0.6 1))`,
   },
+  {
+    name: "20. キネティックタイポグラフィ (text)",
+    source: `out (text 0.25 "noname"
+     |> fill (hsv (fract (time * 0.1)) 0.6 1)
+     |> glow 0.6
+     |> move [0, 0.05 * sin (time * 2)])`,
+  },
 ];
