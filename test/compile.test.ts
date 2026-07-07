@@ -91,6 +91,43 @@ test("同じ文字列を複数回使っても textTextures は重複しない", 
   assert.equal(r.program!.textTextures.length, 1);
 });
 
+test("scatter が instanced 描画に昇格し損ねると警告が出る(見えない性能崖の可視化)", () => {
+  // rot を挟むと sprite マーカーが引き継がれず(move/fill/glow 以外は安全フォールバック)
+  // O(n) の SDF ループに転落する。n=100 > UNROLL_LIMIT(64)なので loopShape が働く
+  const r = compile(`out (scatter 100 \\i ->
+    point 0.05
+    |> move [hash i * 2 - 1, hash (i+1) * 2 - 1]
+    |> rot (hash i)
+    |> fill white)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(
+    r.diagnostics.some((d) => d.severity === "warning" && /instanced 描画に昇格せず/.test(d.message)),
+    JSON.stringify(r.diagnostics),
+  );
+});
+
+test("scatter が sprite 経路に昇格すれば警告は出ない", () => {
+  const r = compile(`out (render (orbit 4 0)
+    (scatter 100 \\i ->
+      point 0.05
+      |> move [hash i * 2 - 1, hash (i+1) * 2 - 1, 0]
+      |> fill white))`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(!r.diagnostics.some((d) => /instanced 描画に昇格せず/.test(d.message)), JSON.stringify(r.diagnostics));
+});
+
+test("scatter が strip 経路に昇格すれば警告は出ない", () => {
+  const r = compile(`out (scatter 100 \\i ->
+    line [hash i * 2 - 1, hash (i+1) * 2 - 1] [hash (i+2) * 2 - 1, hash (i+3) * 2 - 1]
+    |> outline 0.01
+    |> fill white)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(!r.diagnostics.some((d) => /instanced 描画に昇格せず/.test(d.message)), JSON.stringify(r.diagnostics));
+});
+
 test("glitch は image パスにコンパイルされる", () => {
   const r = compile(`out (circle 0.3 |> fill white |> glitch 0.5)`);
   assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));

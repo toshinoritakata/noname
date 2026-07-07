@@ -120,6 +120,23 @@ export function loopShape(ctx: Ctx, n: number, gen: (i: VNum) => VShape, span: S
         };
       }
     }
+    // ここまで来た = instanced 描画(ADR-0014/0016)に昇格せず、以下の O(n) SDF
+    // ループにフォールバックする。見た目は変わらないが、n が大きいシーンでは
+    // フレームレートに直結する「見えない性能崖」なので警告で可視化する
+    // (この崖を実際に踏んで気づいた: liftDist/liftField 周りの副チャンネル
+    // 伝播の脆さを調べていた際、scatter で少し違う書き方をするだけで
+    // O(1) の instanced 描画から無警告で O(n) ループに転落することが分かった)
+    ctx.diags.push({
+      severity: "warning",
+      message:
+        `scatter ${n}個が instanced 描画に昇格せず、O(n) の SDF ループになりました。` +
+        `対象になるのは \`point r |> move v |> fill/glow\`(パーティクル、ADR-0014)か ` +
+        `\`line/bezier |> outline w |> fill c\`(ストリップ、ADR-0016)という連鎖だけで、` +
+        `move/fill/glow/outline 以外の合成子(warp/rot/scale/distort/<+> 等)を挟むと ` +
+        `安全のため自動的にこの遅い経路へフォールバックします。n が大きいと ` +
+        `フレームレートに直結するので、対象の連鎖に書き換えられないか確認してください`,
+      span,
+    });
   }
   return {
     v: "shape",
