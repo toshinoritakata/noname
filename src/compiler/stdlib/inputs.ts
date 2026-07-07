@@ -73,9 +73,10 @@ export function installInputs(add: AddFn, addV: AddVFn): void {
       ],
     ]),
   );
-  // HTTP データ入力(ADR-0031): URL/JSONパスはエディタ横のUIで設定するため、
-  // 言語側は固定名のスカラー1つだけを見る(mouse/entropy と同じ形)
-  add("http", (ctx) => rec([["value", inputNum(ctx, "http.value")]]));
+  // WebSocket データ入力(ADR-0033、ADR-0031 のHTTPポーリングを置き換え):
+  // URL/JSONパスはエディタ横のUIで設定するため、言語側は固定名のスカラー1つ
+  // だけを見る(mouse/entropy と同じ形)
+  add("ws", (ctx) => rec([["value", inputNum(ctx, "ws.value")]]));
   // webcam(ADR-0030): prev/simulate と同じ「2Dテクスチャを worldToUv でサンプルする
   // Field」パターン。3D用の `camera eye target` コンストラクタと名前が衝突しないよう
   // `webcam` にした

@@ -67,11 +67,11 @@ test("webcam は cam テクスチャを参照する image パスにコンパイ�
   assert.ok(image.textures.includes("cam"), JSON.stringify(image.textures));
 });
 
-test("http.value は入力参照にコンパイルされる(ADR-0031)", () => {
-  const r = compile(`out (circle (0.2 + http.value * 0.01) |> fill white)`);
+test("ws.value は入力参照にコンパイルされる(ADR-0033)", () => {
+  const r = compile(`out (circle (0.2 + ws.value * 0.01) |> fill white)`);
   assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
   assert.ok(r.program);
-  assert.ok(r.program!.uniformLayout.inputs.includes("http.value"));
+  assert.ok(r.program!.uniformLayout.inputs.includes("ws.value"));
 });
 
 test("text は文字列リテラルを受け取り、text:<hash>:aspect 入力とtextTexturesを持つ(ADR-0032)", () => {

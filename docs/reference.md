@@ -278,7 +278,7 @@ Cam, Dur(時間リテラルの型)
 | `tuio.cursor i` | `Float -> {pos,angle,vel,alive,age}` | TUIOカーソル(要WebSocket中継、implementation.md 5.3.1) |
 | `osc.f n` | `Float -> Float` | 汎用OSC(TouchOSC/Lemur等)、固定32スロットのバンク(`n` は0〜31、要 `bridge/` の中継ヘルパー、ADR-0029) |
 | `webcam` | `Image` | Webカメラ映像(`prev` と同じ2Dサンプル場。要カメラ許可、ADR-0030) |
-| `http.value` | `Float` | エディタ横のUIで設定したURL/JSONパスから5秒おきに取得した数値(ADR-0031) |
+| `ws.value` | `Float` | エディタ横のUIで設定したWebSocket URL/JSONパスから、サーバがpushするたびに反映される数値(ADR-0033。ADR-0031のHTTPポーリングを置き換え) |
 | `entropy` | `Float` | 毎フレーム更新される真の乱数(0..1、非決定的)。決定的な `hash` とは対照的(ADR-0021) |
 
 ### 4.13 色定数

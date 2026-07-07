@@ -25,10 +25,6 @@ export interface InputAdapter {
   start?(): void;
 }
 
-/** HTTP データ入力(ADR-0031)のポーリング間隔。1フレーム(16ms)には到底収まらないので、
- * OSC/audio と同じ「バックグラウンドで定期取得し、最新値をその都度参照する」形にする */
-const HTTP_POLL_MS = 5000;
-
 /** JSON の中からドット区切りのパス(例 "current.temp_c")で値を取り出す。
  * 数字だけのセグメントは配列添字としても機能する(JSではキーが文字列でも同じ) */
 function getJsonPath(obj: unknown, path: string): unknown {
@@ -88,11 +84,11 @@ export class InputEngine {
   camTexture: GPUTexture | null = null;
   private cameraRequested = false;
   onCameraState: ((state: string) => void) | null = null;
-  private httpUrl: string | null = null;
-  private httpPath = "";
-  private httpValue = 0;
-  private httpTimer: ReturnType<typeof setInterval> | null = null;
-  onHttpState: ((state: string) => void) | null = null;
+  private wsUrl: string | null = null;
+  private wsPath = "";
+  private wsValue = 0;
+  private wsSocket: WebSocket | null = null;
+  onWsState: ((state: string) => void) | null = null;
 
   constructor(device: GPUDevice, canvas: HTMLCanvasElement) {
     this.device = device;
@@ -243,38 +239,43 @@ export class InputEngine {
       });
   }
 
-  /** UI(エディタ横のテキストボックス、ADR-0031)から呼ばれる。URL は言語仕様に
-   * 持ち込まない(この言語には1行文字列リテラルが無く、UI側の設定で十分なため)。
-   * URL が空なら停止するだけ(前回値は最後に取れた値のまま残る、ADR-0010 の精神) */
-  setHttpSource(url: string, path: string): void {
-    if (this.httpTimer !== null) {
-      clearInterval(this.httpTimer);
-      this.httpTimer = null;
-    }
-    this.httpUrl = url || null;
-    this.httpPath = path;
-    if (!this.httpUrl) {
-      this.onHttpState?.("");
+  /** UI(エディタ横のテキストボックス、ADR-0033)から呼ばれる。URL は言語仕様に
+   * 持ち込まない(この言語には1行文字列リテラルはあるが、URLは「作品ロジック」
+   * ではなく実行環境の設定に近いという ADR-0031 の判断を踏襲)。
+   * HTTPポーリング(ADR-0031、廃止)と違い接続を張りっぱなしにし、サーバ側からの
+   * push を都度反映する。URL が空なら切断するだけ(前回値は保持、ADR-0010 の精神) */
+  setWsSource(url: string, path: string): void {
+    this.wsSocket?.close();
+    this.wsSocket = null;
+    this.wsUrl = url || null;
+    this.wsPath = path;
+    if (!this.wsUrl) {
+      this.onWsState?.("");
       return;
     }
-    const poll = (): void => {
-      fetch(this.httpUrl!)
-        .then((r) => r.json())
-        .then((obj) => {
-          const v = getJsonPath(obj, this.httpPath);
+    try {
+      const ws = new WebSocket(this.wsUrl);
+      this.wsSocket = ws;
+      ws.onopen = () => this.onWsState?.("ws: 接続");
+      ws.onmessage = (ev) => {
+        try {
+          const obj = JSON.parse(String(ev.data));
+          const v = getJsonPath(obj, this.wsPath);
           if (typeof v === "number" && Number.isFinite(v)) {
-            this.httpValue = v;
-            this.onHttpState?.(`http: ${v}`);
+            this.wsValue = v;
+            this.onWsState?.(`ws: ${v}`);
           } else {
-            this.onHttpState?.(`http: パス "${this.httpPath}" が数値ではありません`);
+            this.onWsState?.(`ws: パス "${this.wsPath}" が数値ではありません`);
           }
-        })
-        .catch((e) => {
-          this.onHttpState?.(`http: 失敗 (${e?.message ?? e})`);
-        });
-    };
-    poll();
-    this.httpTimer = setInterval(poll, HTTP_POLL_MS);
+        } catch {
+          this.onWsState?.("ws: JSONとして解釈できないメッセージ");
+        }
+      };
+      ws.onerror = () => this.onWsState?.("ws: 接続エラー");
+      ws.onclose = () => this.onWsState?.("ws: 切断");
+    } catch (e) {
+      this.onWsState?.(`ws: 失敗 (${e instanceof Error ? e.message : e})`);
+    }
   }
 
   /** 毎フレーム更新。値は values に貯まり、ProgramSlot が uniform に書く */
@@ -283,7 +284,7 @@ export class InputEngine {
     this.values.set("mouse.y", this.mouseY);
     this.values.set("mouse.down", this.mouseDown);
     this.values.set("entropy", Math.random()); // 真の乱数は入力として注入し、作品関数自体は純粋に保つ(ADR-0021)
-    this.values.set("http.value", this.httpValue);
+    this.values.set("ws.value", this.wsValue);
 
     if (this.analyser && this.fftBins) {
       this.analyser.getFloatFrequencyData(this.fftBins as Float32Array<ArrayBuffer>);

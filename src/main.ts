@@ -24,9 +24,9 @@ async function boot(): Promise<void> {
   const canvas = $<HTMLCanvasElement>("stage") as unknown as HTMLCanvasElement;
   const picker = $<HTMLSelectElement>("example-picker");
   const fpsEl = $("fps");
-  const httpUrlEl = $<HTMLInputElement>("http-url");
-  const httpPathEl = $<HTMLInputElement>("http-path");
-  const httpStatusEl = $("http-status");
+  const wsUrlEl = $<HTMLInputElement>("ws-url");
+  const wsPathEl = $<HTMLInputElement>("ws-path");
+  const wsStatusEl = $("ws-status");
 
   const setStatus = (s: string): void => {
     statusEl.textContent = s;
@@ -44,17 +44,17 @@ async function boot(): Promise<void> {
 
   let renderer: Renderer;
 
-  // HTTP データ入力(ADR-0031)。URL/JSONパスはUIで設定し、言語側は固定名
-  // `http.value` だけを見る。InputEngine は device.lost で作り直されるので、
-  // その都度 UI の現在値を渡し直す
-  const applyHttpSource = (): void => {
-    renderer.inputs.onHttpState = (s) => {
-      httpStatusEl.textContent = s;
+  // WebSocket データ入力(ADR-0033、ADR-0031 の HTTPポーリングを置き換え)。
+  // URL/JSONパスはUIで設定し、言語側は固定名 `ws.value` だけを見る。
+  // InputEngine は device.lost で作り直されるので、その都度 UI の現在値を渡し直す
+  const applyWsSource = (): void => {
+    renderer.inputs.onWsState = (s) => {
+      wsStatusEl.textContent = s;
     };
-    renderer.inputs.setHttpSource(httpUrlEl.value.trim(), httpPathEl.value.trim());
+    renderer.inputs.setWsSource(wsUrlEl.value.trim(), wsPathEl.value.trim());
   };
-  httpUrlEl.addEventListener("change", applyHttpSource);
-  httpPathEl.addEventListener("change", applyHttpSource);
+  wsUrlEl.addEventListener("change", applyWsSource);
+  wsPathEl.addEventListener("change", applyWsSource);
 
   // GPU デバイスの初期化+配線。device.lost からの再初期化でも再利用する
   const setupRenderer = async (): Promise<void> => {
@@ -64,7 +64,7 @@ async function boot(): Promise<void> {
     renderer.inputs.registerAdapter(makeOscAdapter());
     renderer.inputs.onAudioState = setStatus;
     renderer.inputs.onCameraState = setStatus;
-    applyHttpSource();
+    applyWsSource();
     renderer.onFps = (fps) => {
       fpsEl.textContent = `${fps.toFixed(0)} fps`;
     };

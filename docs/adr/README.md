@@ -47,8 +47,9 @@
 - [0028](0028-runtime-hotswap-hardening.md) — ランタイムのホットスワップ経路を3点補強する(スクラブの流量制御・device.lost からの自動再初期化・パイプラインキャッシュの LRU 上限)
 - [0029](0029-osc-input-via-bridge-helper.md) — OSC 入力を汎用ブリッジヘルパー(Rust)経由で追加する(フルネイティブ書き直しの代替として、OS統合が要る部分だけを外部ヘルパーに切り出すパターンを一般化)
 - [0030](0030-webcam-input-via-sample-texture.md) — Webcam入力を `prev` と同じ sample テクスチャパターンで追加する(ADR-0012の2正規形どちらにも当てはまらない「可変解像度の2D画像」という第3のケース)
-- [0031](0031-http-json-input-via-ui-configured-url.md) — HTTP(JSON)入力を、UIで設定するURL+固定名スカラー `http.value` として追加する(言語仕様は不変、URLは実行環境の設定としてUI側に置く)
+- [0031](0031-http-json-input-via-ui-configured-url.md) — (撤回・[0033](0033-websocket-input-replaces-http-polling.md)に差し替え) HTTP(JSON)入力を、UIで設定するURL+固定名スカラー `http.value` として追加する案
 - [0032](0032-text-glyph-rendering-via-canvas2d-raster.md) — `text` は Canvas2D でラスタライズした文字列を疑似SDFのShapeとして扱う(1行文字列リテラルを新規追加、コンパイラはDOM非依存のまま維持)
+- [0033](0033-websocket-input-replaces-http-polling.md) — WebSocket 入力(`ws.value`)を追加し、HTTPポーリング(ADR-0031)を置き換える(5秒遅延の解消、URLをUIに置く判断は継承)
 
 ## 未決(ADR 化待ち)
 
