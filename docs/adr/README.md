@@ -56,6 +56,7 @@
 - [0037](0037-line-bezier-sdf-fully-removed.md) — line/bezier のSDFを完全に廃止し、instanced描画(strip2D/strip3D)専用にする(ADR-0015を撤回。単体使用も含めて move/cut/inter/<+>/if/morph 等との合成はコンパイルエラーになる)
 - [0038](0038-line-bezier-width-application-sugar.md) — `line a b w` は Shape への数値適用として `outline` の糖衣構文にする(固定arityのカリー化では第3引数を追加できないため、確定済みShapeへの追加適用として実現)
 - [0039](0039-hash-bitcast-mix.md) — hash系関数を bitcast+MurmurHash3(fmix32)ベースに置き換える(10進小数演算だった旧実装が大きい入力で衝突頻発だった欠陥の修正。scatterのNが数万規模・time経過が長いセッションで顕著)
+- [0040](0040-scatter-unroll-probes-instancing-first.md) — scatter は unroll するかどうかの前に instanced 描画の判定を行う(ADR-0037後、Nが小さい(unroll閾値以下の)line/bezierのscatterが必ずコンパイルエラーになっていた回帰の修正)
 
 ## 未決(ADR 化待ち)
 

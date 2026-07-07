@@ -50,3 +50,19 @@ test("cut/inter keep stripBatches from the base shape", () => {
   assert.ok(stripCount(`${STRANDS}\nout (cut (circle 0.5) strands)`) > 0);
   assert.ok(stripCount(`${STRANDS}\nout (inter strands (circle 5))`) > 0);
 });
+
+test("scatter した line/bezier は n が小さくても(unroll閾値以下でも)instanced 描画になる(ADR-0040)", () => {
+  // unroll 閾値(UNROLL_LIMIT=64)以下のNだと、以前は instanced 昇格の判定より
+  // 先に unroll+foldUnion していたため、line/bezier(ADR-0037でSDFを持たない)
+  // を dist で合成しようとして必ずコンパイルエラーになっていた
+  const small = `strands = scatter 2 \\i ->
+  bezier [hash i, hash (i+1)] [hash (i+2), hash (i+3)] [hash (i+4), hash (i+5)]
+  |> outline 0.02
+  |> fill (hsv (hash (i + 6)) 0.6 1)
+`;
+  for (const n of [1, 2, 3, 10, 63, 64, 65]) {
+    const src = small.replace("scatter 2 ", `scatter ${n} `) + `\nout strands`;
+    const count = stripCount(src);
+    assert.ok(count > 0, `n=${n}: stripBatches が空(${count})`);
+  }
+});

@@ -148,12 +148,21 @@ export function loopShape(ctx: Ctx, n: number, gen: (i: VNum) => VShape, span: S
         };
       }
     }
-    // ここまで来た = instanced 描画(ADR-0014/0016/0036)に昇格せず、以下の O(n) SDF
-    // ループにフォールバックする。見た目は変わらないが、n が大きいシーンでは
-    // フレームレートに直結する「見えない性能崖」なので警告で可視化する
-    // (この崖を実際に踏んで気づいた: liftDist/liftField 周りの副チャンネル
-    // 伝播の脆さを調べていた際、scatter で少し違う書き方をするだけで
-    // O(1) の instanced 描画から無警告で O(n) ループに転落することが分かった)
+    // ここまで来た = instanced 描画(ADR-0014/0016/0036)に昇格しなかった。line/bezier
+    // には SDF が無い(ADR-0037)ので、この場合は line/bezier を含まない通常の SDF
+    // 図形だったということ(含んでいれば以下の dist 呼び出しで即エラーになる)。
+    // n が小さいうちは JS 側で unroll して foldUnion(implementation.md 3.2-2)、
+    // 大きい場合だけ WGSL の for ループにする(ADR-0040)。ループ版は見た目を
+    // 変えずに O(n) のままフレームレートに直結する「見えない性能崖」なので、
+    // その場合だけ警告で可視化する(この崖を実際に踏んで気づいた: liftDist/
+    // liftField 周りの副チャンネル伝播の脆さを調べていた際、scatter で少し
+    // 違う書き方をするだけで O(1) の instanced 描画から無警告で O(n) ループに
+    // 転落することが分かった)
+    if (n <= UNROLL_LIMIT) {
+      const shapes: VShape[] = [];
+      for (let i = 0; i < n; i++) shapes.push(gen(constF(ctx, i)));
+      return foldUnion(ctx, shapes, span);
+    }
     ctx.diags.push({
       severity: "warning",
       message:
@@ -343,11 +352,11 @@ function scatterBuiltin(): VBuiltin {
     const n = Math.round(staticNum(nV, "scatter の要素数", span));
     if (n <= 0) fail("scatter の要素数は正の整数です", span);
     const gen = (i: VNum): VShape => toShape(ctx, ctx.apply(ctx, f, i, span), span);
-    if (n <= UNROLL_LIMIT) {
-      const shapes: VShape[] = [];
-      for (let i = 0; i < n; i++) shapes.push(gen(constF(ctx, i)));
-      return foldUnion(ctx, shapes, span);
-    }
+    // unroll するか WGSL ループにするかは loopShape が instanced 描画の
+    // 判定(プローブ)と一緒に決める(ADR-0040)。ここで n の大小だけを見て
+    // 先に unroll してしまうと、line/bezier(ADR-0037で SDF を持たない)を
+    // instanced 描画に昇格させる前に dist を呼んでしまい、n が小さいだけで
+    // 常にコンパイルエラーになっていた
     return loopShape(ctx, n, gen, span, true);
   });
 }
