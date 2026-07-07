@@ -199,6 +199,7 @@ export function toImage(ctx: Ctx, v: Value, span: Span): VField {
       dim: 2,
       fn: (c, p, s) => asColorValue(c, f.fn(c, p, s), s),
       state: f.state,
+      stripBatches: f.stripBatches,
     };
   }
   if (v.v === "vec" || v.v === "num") {

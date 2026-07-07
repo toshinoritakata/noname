@@ -18,6 +18,7 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
           const col = img.fn(c, p, s) as VVec;
           return vecV(4, binIR(c, "*", col.ir, kn.ir, "vec4"));
         },
+        stripBatches: img.stripBatches,
       } as VField;
     }),
   );
@@ -30,6 +31,7 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
         v: "field",
         dim: 2,
         fn: (c, p, s) => img.fn(c, vecV(2, binIR(c, "/", p.ir, kn.ir, "vec2")), s),
+        stripBatches: img.stripBatches,
       } as VField;
     }),
   );
@@ -104,6 +106,7 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
           const outA = call(c, "max", [baseA, glowAlpha], "f32");
           return vecV(4, c.arena.node({ k: "vec", parts: [outRgb, outA], t: "vec4" }));
         },
+        stripBatches: img.stripBatches,
       } as VField;
     }),
   );
@@ -128,6 +131,7 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
           const a = c.arena.node({ k: "swiz", a: cg.ir, sel: "w", t: "f32" });
           return vecV(4, c.arena.node({ k: "vec", parts: [r, g, b, a], t: "vec4" }));
         },
+        stripBatches: img.stripBatches,
       } as VField;
     }),
   );
@@ -149,6 +153,7 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
           const a = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
           return vecV(4, c.arena.node({ k: "vec", parts: [rgb2, a], t: "vec4" }));
         },
+        stripBatches: img.stripBatches,
       } as VField;
     }),
   );
@@ -164,6 +169,7 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
           const base = img.fn(c, p, s) as VVec;
           return vecV(4, call(c, "vignetteFn", [base.ir, p.ir, kn.ir], "vec4"));
         },
+        stripBatches: img.stripBatches,
       } as VField;
     }),
   );
