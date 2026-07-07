@@ -12,6 +12,8 @@ import {
   describe,
   fail,
   inputNum,
+  liftDist,
+  liftField,
   num,
   selectValue,
   staticNum,
@@ -19,7 +21,7 @@ import {
   vecV,
 } from "../ops.ts";
 import { substTime } from "../stage.ts";
-import type { Ctx, Value, VField, VShape } from "../value.ts";
+import type { Ctx, Value } from "../value.ts";
 import { bi } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 import { mathApply } from "./iteration.ts";
@@ -35,16 +37,18 @@ function timeWarp(ctx: Ctx, x: Value, remap: (c: Ctx, t: NodeId) => NodeId, span
       return vecV(x.n, apply(x.ir), x.sval);
     case "field": {
       const f = x;
-      return { v: "field", dim: f.dim, fn: (c, p, s) => timeWarp(c, f.fn(c, p, s), remap, s), state: f.state } as VField;
+      return liftField(f, (c, p, s) => timeWarp(c, f.fn(c, p, s), remap, s));
     }
     case "shape": {
       const sh = x;
-      return {
-        v: "shape",
-        dim: sh.dim,
-        dist: (c, p, s) => num(apply(sh.dist(c, p, s).ir)),
-        colour: (c, p, s) => vecV(4, apply(sh.colour(c, p, s).ir)),
-      } as VShape;
+      // dist/colour の IR 中の time 参照を差し替えるだけで、座標や個体の同一性は
+      // 変えない。sprite/strip2D(単項マーカー)は warpValue と同じ理由で明示的に
+      // 落とす(中の time 依存式まで追って書き換えるのは今はやらない、安全フォールバック)
+      return liftDist(
+        sh,
+        (c, p, s) => num(apply(sh.dist(c, p, s).ir)),
+        { colour: (c, p, s) => vecV(4, apply(sh.colour(c, p, s).ir)), sprite: undefined, strip2D: undefined },
+      );
     }
     default:
       fail(`slow / loop は ${describe(x)} には使えません`, span);

@@ -1,7 +1,7 @@
 // 画像合成・ポスト(元 stdlib.ts 1343-1460行)。
 
-import { asNum, call, timeNode, toImage, vecV, worldToUv } from "../ops.ts";
-import type { VField, VVec } from "../value.ts";
+import { asNum, call, liftField, timeNode, toImage, vecV, worldToUv } from "../ops.ts";
+import type { VVec } from "../value.ts";
 import { bi, binIR } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 
@@ -11,15 +11,10 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
     bi("fade", 2, (ctx, [k, x], span) => {
       const kn = asNum(k, span);
       const img = toImage(ctx, x, span);
-      return {
-        v: "field",
-        dim: 2,
-        fn: (c, p, s) => {
-          const col = img.fn(c, p, s) as VVec;
-          return vecV(4, binIR(c, "*", col.ir, kn.ir, "vec4"));
-        },
-        stripBatches: img.stripBatches,
-      } as VField;
+      return liftField(img, (c, p, s) => {
+        const col = img.fn(c, p, s) as VVec;
+        return vecV(4, binIR(c, "*", col.ir, kn.ir, "vec4"));
+      });
     }),
   );
   addV(
@@ -27,12 +22,7 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
     bi("zoom", 2, (ctx, [k, x], span) => {
       const kn = asNum(k, span);
       const img = toImage(ctx, x, span);
-      return {
-        v: "field",
-        dim: 2,
-        fn: (c, p, s) => img.fn(c, vecV(2, binIR(c, "/", p.ir, kn.ir, "vec2")), s),
-        stripBatches: img.stripBatches,
-      } as VField;
+      return liftField(img, (c, p, s) => img.fn(c, vecV(2, binIR(c, "/", p.ir, kn.ir, "vec2")), s));
     }),
   );
   addV(
@@ -75,39 +65,34 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
       const extractRoot = call(ctx, "brightPass", [premultiplied], "vec4");
       const id = ctx.blooms.length;
       ctx.blooms.push({ kind: "bloom", id, extract: extractRoot, levels, span });
-      return {
-        v: "field",
-        dim: 2,
-        fn: (c, p, s) => {
-          const base = img.fn(c, p, s) as VVec;
-          const glow = vecV(4, c.arena.node({ k: "sample", tex: `bloom:${id}:u0`, p: worldToUv(c, p.ir), t: "vec4" }));
-          const q = binIR(c, "*", glow.ir, kn.ir, "vec4");
-          const outRgb = binIR(
-            c,
-            "+",
-            c.arena.node({ k: "swiz", a: base.ir, sel: "xyz", t: "vec3" }),
-            c.arena.node({ k: "swiz", a: q, sel: "xyz", t: "vec3" }),
-            "vec3",
-          );
-          // glow の強さ(rgb最大成分、0..1にクランプ)をアルファの下限にする
-          // (image パスの最終出力が自己アルファで事前乗算するため、アルファ0の
-          // 背景に glow を足しても持ち上げないと消えてしまう。ADR-0018)
-          const qr = c.arena.node({ k: "swiz", a: q, sel: "x", t: "f32" });
-          const qg = c.arena.node({ k: "swiz", a: q, sel: "y", t: "f32" });
-          const qb = c.arena.node({ k: "swiz", a: q, sel: "z", t: "f32" });
-          const qMax = call(c, "max", [call(c, "max", [qr, qg], "f32"), qb], "f32");
-          const glowAlpha = call(
-            c,
-            "clamp",
-            [qMax, c.arena.node({ k: "const", v: 0, t: "f32" }), c.arena.node({ k: "const", v: 1, t: "f32" })],
-            "f32",
-          );
-          const baseA = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
-          const outA = call(c, "max", [baseA, glowAlpha], "f32");
-          return vecV(4, c.arena.node({ k: "vec", parts: [outRgb, outA], t: "vec4" }));
-        },
-        stripBatches: img.stripBatches,
-      } as VField;
+      return liftField(img, (c, p, s) => {
+        const base = img.fn(c, p, s) as VVec;
+        const glow = vecV(4, c.arena.node({ k: "sample", tex: `bloom:${id}:u0`, p: worldToUv(c, p.ir), t: "vec4" }));
+        const q = binIR(c, "*", glow.ir, kn.ir, "vec4");
+        const outRgb = binIR(
+          c,
+          "+",
+          c.arena.node({ k: "swiz", a: base.ir, sel: "xyz", t: "vec3" }),
+          c.arena.node({ k: "swiz", a: q, sel: "xyz", t: "vec3" }),
+          "vec3",
+        );
+        // glow の強さ(rgb最大成分、0..1にクランプ)をアルファの下限にする
+        // (image パスの最終出力が自己アルファで事前乗算するため、アルファ0の
+        // 背景に glow を足しても持ち上げないと消えてしまう。ADR-0018)
+        const qr = c.arena.node({ k: "swiz", a: q, sel: "x", t: "f32" });
+        const qg = c.arena.node({ k: "swiz", a: q, sel: "y", t: "f32" });
+        const qb = c.arena.node({ k: "swiz", a: q, sel: "z", t: "f32" });
+        const qMax = call(c, "max", [call(c, "max", [qr, qg], "f32"), qb], "f32");
+        const glowAlpha = call(
+          c,
+          "clamp",
+          [qMax, c.arena.node({ k: "const", v: 0, t: "f32" }), c.arena.node({ k: "const", v: 1, t: "f32" })],
+          "f32",
+        );
+        const baseA = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
+        const outA = call(c, "max", [baseA, glowAlpha], "f32");
+        return vecV(4, c.arena.node({ k: "vec", parts: [outRgb, outA], t: "vec4" }));
+      });
     }),
   );
   addV(
@@ -115,24 +100,19 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
     bi("chromatic", 2, (ctx, [k, x], span) => {
       const kn = asNum(k, span);
       const img = toImage(ctx, x, span);
-      return {
-        v: "field",
-        dim: 2,
-        fn: (c, p, s) => {
-          const one = c.arena.node({ k: "const", v: 1, t: "f32" });
-          const pr = binIR(c, "*", p.ir, binIR(c, "+", one, kn.ir, "f32"), "vec2");
-          const pb = binIR(c, "*", p.ir, binIR(c, "-", one, kn.ir, "f32"), "vec2");
-          const cr = img.fn(c, vecV(2, pr), s) as VVec;
-          const cg = img.fn(c, p, s) as VVec;
-          const cb = img.fn(c, vecV(2, pb), s) as VVec;
-          const r = c.arena.node({ k: "swiz", a: cr.ir, sel: "x", t: "f32" });
-          const g = c.arena.node({ k: "swiz", a: cg.ir, sel: "y", t: "f32" });
-          const b = c.arena.node({ k: "swiz", a: cb.ir, sel: "z", t: "f32" });
-          const a = c.arena.node({ k: "swiz", a: cg.ir, sel: "w", t: "f32" });
-          return vecV(4, c.arena.node({ k: "vec", parts: [r, g, b, a], t: "vec4" }));
-        },
-        stripBatches: img.stripBatches,
-      } as VField;
+      return liftField(img, (c, p, s) => {
+        const one = c.arena.node({ k: "const", v: 1, t: "f32" });
+        const pr = binIR(c, "*", p.ir, binIR(c, "+", one, kn.ir, "f32"), "vec2");
+        const pb = binIR(c, "*", p.ir, binIR(c, "-", one, kn.ir, "f32"), "vec2");
+        const cr = img.fn(c, vecV(2, pr), s) as VVec;
+        const cg = img.fn(c, p, s) as VVec;
+        const cb = img.fn(c, vecV(2, pb), s) as VVec;
+        const r = c.arena.node({ k: "swiz", a: cr.ir, sel: "x", t: "f32" });
+        const g = c.arena.node({ k: "swiz", a: cg.ir, sel: "y", t: "f32" });
+        const b = c.arena.node({ k: "swiz", a: cb.ir, sel: "z", t: "f32" });
+        const a = c.arena.node({ k: "swiz", a: cg.ir, sel: "w", t: "f32" });
+        return vecV(4, c.arena.node({ k: "vec", parts: [r, g, b, a], t: "vec4" }));
+      });
     }),
   );
   addV(
@@ -140,21 +120,16 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
     bi("grain", 2, (ctx, [k, x], span) => {
       const kn = asNum(k, span);
       const img = toImage(ctx, x, span);
-      return {
-        v: "field",
-        dim: 2,
-        fn: (c, p, s) => {
-          const base = img.fn(c, p, s) as VVec;
-          const t = timeNode(c);
-          const n = call(c, "grainNoise", [p.ir, t], "f32");
-          const g = binIR(c, "*", n, kn.ir, "f32");
-          const rgb = c.arena.node({ k: "swiz", a: base.ir, sel: "xyz", t: "vec3" });
-          const rgb2 = binIR(c, "+", rgb, g, "vec3");
-          const a = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
-          return vecV(4, c.arena.node({ k: "vec", parts: [rgb2, a], t: "vec4" }));
-        },
-        stripBatches: img.stripBatches,
-      } as VField;
+      return liftField(img, (c, p, s) => {
+        const base = img.fn(c, p, s) as VVec;
+        const t = timeNode(c);
+        const n = call(c, "grainNoise", [p.ir, t], "f32");
+        const g = binIR(c, "*", n, kn.ir, "f32");
+        const rgb = c.arena.node({ k: "swiz", a: base.ir, sel: "xyz", t: "vec3" });
+        const rgb2 = binIR(c, "+", rgb, g, "vec3");
+        const a = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
+        return vecV(4, c.arena.node({ k: "vec", parts: [rgb2, a], t: "vec4" }));
+      });
     }),
   );
   addV(
@@ -162,15 +137,10 @@ export function installPostfx(add: AddFn, addV: AddVFn): void {
     bi("vignette", 2, (ctx, [k, x], span) => {
       const kn = asNum(k, span);
       const img = toImage(ctx, x, span);
-      return {
-        v: "field",
-        dim: 2,
-        fn: (c, p, s) => {
-          const base = img.fn(c, p, s) as VVec;
-          return vecV(4, call(c, "vignetteFn", [base.ir, p.ir, kn.ir], "vec4"));
-        },
-        stripBatches: img.stripBatches,
-      } as VField;
+      return liftField(img, (c, p, s) => {
+        const base = img.fn(c, p, s) as VVec;
+        return vecV(4, call(c, "vignetteFn", [base.ir, p.ir, kn.ir], "vec4"));
+      });
     }),
   );
 }

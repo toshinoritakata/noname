@@ -194,13 +194,7 @@ export function toImage(ctx: Ctx, v: Value, span: Span): VField {
   }
   if (v.v === "field" || v.v === "sim") {
     const f = toField(ctx, v, span);
-    return {
-      v: "field",
-      dim: 2,
-      fn: (c, p, s) => asColorValue(c, f.fn(c, p, s), s),
-      state: f.state,
-      stripBatches: f.stripBatches,
-    };
+    return liftField(f, (c, p, s) => asColorValue(c, f.fn(c, p, s), s), 2);
   }
   if (v.v === "vec" || v.v === "num") {
     const col = asColor(ctx, v, span);
@@ -355,11 +349,15 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
     const fa = a.v === "field" || a.v === "sim" ? toField(ctx, a, span) : null;
     const fb = b.v === "field" || b.v === "sim" ? toField(ctx, b, span) : null;
     const dim = unifyDim(unifyDim(fc ? fc.dim : 0, fa ? fa.dim : 0, span), fb ? fb.dim : 0, span);
+    // stripBatches(scatter 集約後の instanced 描画バッチ)は選ばれなかった側の分も
+    // 無条件で引き継ぐ。dist が無いためフォールバック手段がなく、落とすと消える
+    const stripBatches = [...(fa?.stripBatches ?? []), ...(fb?.stripBatches ?? [])];
     return {
       v: "field",
       dim,
       fn: (c, p, s) =>
         selectValue(c, fc ? fc.fn(c, p, s) : cond, fa ? fa.fn(c, p, s) : a, fb ? fb.fn(c, p, s) : b, s),
+      stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
     } as VField;
   }
   if (cond.v !== "bool") fail(`if の条件は真偽値が必要ですが、${describe(cond)} です`, span);
@@ -370,10 +368,12 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
       const fx = toField(ctx, x, span);
       const fy = toField(ctx, y, span);
       const dim = unifyDim(fx.dim, fy.dim, span);
+      const stripBatches = [...(fx.stripBatches ?? []), ...(fy.stripBatches ?? [])];
       return {
         v: "field",
         dim,
         fn: (cc, p, s) => selectValue(cc, boolV(c), fx.fn(cc, p, s), fy.fn(cc, p, s), s),
+        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
       } as VField;
     }
     if (x.v === "num" && y.v === "num") {
@@ -398,6 +398,11 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
       const dim = unifyDim(x.dim, y.dim, span);
       const xs = x;
       const ys = y;
+      // spriteBatches/stripBatches(集約後)はどちらの枝が選ばれても無条件で引き継ぐ
+      // (shapeUnion と同じ理由)。sprite/strip2D(集約前の単項マーカー)は二項combinatorで
+      // 意味が壊れるため明示的に落とす(= 安全に SDF フォールバック)
+      const spriteBatches = [...(xs.spriteBatches ?? []), ...(ys.spriteBatches ?? [])];
+      const stripBatches = [...(xs.stripBatches ?? []), ...(ys.stripBatches ?? [])];
       return {
         v: "shape",
         dim,
@@ -405,6 +410,10 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
           num(cx.arena.node({ k: "select", c, a: xs.dist(cx, p, s).ir, b: ys.dist(cx, p, s).ir, t: "f32" })),
         colour: (cx, p, s) =>
           vecV(4, cx.arena.node({ k: "select", c, a: xs.colour(cx, p, s).ir, b: ys.colour(cx, p, s).ir, t: "vec4" })),
+        sprite: undefined,
+        strip2D: undefined,
+        spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
+        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
       } as VShape;
     }
     fail(`then と else の型が合いません: ${describe(x)} と ${describe(y)}`, span);
@@ -418,16 +427,22 @@ export function mixValue(ctx: Ctx, a: Value, b: Value, t: VNum, span: Span): Val
     const fa = toField(ctx, a, span);
     const fb = toField(ctx, b, span);
     const dim = unifyDim(fa.dim, fb.dim, span);
+    const stripBatches = [...(fa.stripBatches ?? []), ...(fb.stripBatches ?? [])];
     return {
       v: "field",
       dim,
       fn: (c, p, s) => mixValue(c, fa.fn(c, p, s), fb.fn(c, p, s), t, s),
+      stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
     } as VField;
   }
   if (a.v === "shape" && b.v === "shape") {
     const dim = unifyDim(a.dim, b.dim, span);
     const as_ = a;
     const bs = b;
+    // selectValue と同じ理由: spriteBatches/stripBatches は無条件で引き継ぎ、
+    // sprite/strip2D(単項マーカー)は補間で意味が壊れるため明示的に落とす
+    const spriteBatches = [...(as_.spriteBatches ?? []), ...(bs.spriteBatches ?? [])];
+    const stripBatches = [...(as_.stripBatches ?? []), ...(bs.stripBatches ?? [])];
     return {
       v: "shape",
       dim,
@@ -435,6 +450,10 @@ export function mixValue(ctx: Ctx, a: Value, b: Value, t: VNum, span: Span): Val
         num(call(c, "mix", [as_.dist(c, p, s).ir, bs.dist(c, p, s).ir, t.ir], "f32")),
       colour: (c, p, s) =>
         vecV(4, call(c, "mix", [as_.colour(c, p, s).ir, bs.colour(c, p, s).ir, t.ir], "vec4")),
+      sprite: undefined,
+      strip2D: undefined,
+      spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
+      stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
     } as VShape;
   }
   if (a.v === "num" && b.v === "num") {
@@ -459,12 +478,38 @@ export function mixValue(ctx: Ctx, a: Value, b: Value, t: VNum, span: Span): Val
 
 // ---- 図形・画像の合成 -----------------------------------------------------------
 
+/** base を丸ごと引き継ぎ、fn(と必要なら dim)だけ差し替えて場をリフトする。
+ * state/stripBatches は「fn が何をしようと安全に持ち越せる」性質なので無条件で継承する */
+export function liftField(base: VField, fn: VField["fn"], dim: Dim = base.dim): VField {
+  return { ...base, dim, fn };
+}
+
+/**
+ * dist を変える図形合成子の共通リフト。spriteBatches/stripBatches(scatter 集約後の
+ * instanced 描画バッチ)は dist を書き換えても描画実体は別パスなので無条件で base
+ * から継承する。一方 sprite/strip2D(集約前の単項マーカー、ADR-0014/0016)は
+ * 「中心・半径・制御点が座標に依存しない」という前提を dist の変更が壊しうるため、
+ * 呼び出し側に(undefined でもよいので)必ず明示させる — 書き忘れて安全側に転ぶバグを
+ * 型で防ぐ。colour は省略時 base.colour のまま(dist だけの変更なら十分)。
+ * warp 系のように colour も座標変換で変わる場合は明示的に渡す
+ */
+export function liftDist(
+  base: VShape,
+  dist: VShape["dist"],
+  opts: { colour?: VShape["colour"]; sprite: VShape["sprite"]; strip2D: VShape["strip2D"] },
+): VShape {
+  return { ...base, dist, colour: opts.colour ?? base.colour, sprite: opts.sprite, strip2D: opts.strip2D };
+}
+
 export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
   const dim = unifyDim(a.dim, b.dim, span);
-  // スプライトバッチ(scatter の instanced 描画。ADR-0014)は合成後も引き継ぐ。
-  // バッチを持つ側の dist は定数 +∞ にすり替え済みなので、通常の min/select
-  // ロジックはそのまま安全に動く(常に「実体のある側」が選ばれる)
+  // スプライト/ストリップバッチ(scatter の instanced 描画。ADR-0014/0016)は合成後も
+  // 引き継ぐ。バッチを持つ側の dist は定数 +∞ にすり替え済みなので、通常の min/select
+  // ロジックはそのまま安全に動く(常に「実体のある側」が選ばれる)。この2つは
+  // 「集約後は無条件で継承」が唯一の正しい選択で、落とすと該当図形が描画されず消える
+  // (集約前の sprite/strip2D と違い、dist の SDF フォールバックが存在しないため)
   const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
+  const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
   return {
     v: "shape",
     dim,
@@ -482,6 +527,7 @@ export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
       return vecV(4, c.arena.node({ k: "select", c: cond, a: ca.ir, b: cb.ir, t: "vec4" }));
     },
     spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
+    stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
   };
 }
 

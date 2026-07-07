@@ -43,6 +43,7 @@
 - [0024](0024-bloom-radius-adaptive-from-k.md) — `bloom` の半径(ダウンサンプル段数)は独立引数にせず、`k` の静的な値から適応的に決める
 - [0025](0025-bloom-native-res-extract.md) — `bloom` の抽出はネイティブ解像度で評価してからボックスフィルタで畳み込む(半解像度での直接評価によるモアレの根本修正)
 - [0026](0026-bloom-premultiply-before-brightpass.md) — `bloom` の抽出は alpha を rgb に事前乗算してから行う(図形の外側が誤って発光するバグの修正)
+- [0027](0027-lift-helpers-for-shape-field-metadata.md) — `liftField`/`liftDist` で Shape/Field の副チャンネル(sprite/strip2D/spriteBatches/stripBatches/state)伝播を集約する(line/bezier が bloom 等で消えるバグの根本修正)
 
 ## 未決(ADR 化待ち)
 

@@ -4,7 +4,7 @@
 
 import type { Span } from "../diag.ts";
 import { vecType, type IRType, type NodeId } from "../ir.ts";
-import { asNum, asVec, call, constVec, describe, fail, lowerPattern, num, simToField, toField, vecV } from "../ops.ts";
+import { asNum, asVec, call, constVec, describe, fail, liftDist, liftField, lowerPattern, num, simToField, toField, vecV } from "../ops.ts";
 import type { Ctx, Dim, Value, VBuiltin, VField, VNum, VShape, VVec } from "../value.ts";
 
 /** builtin テーブルへの登録関数(ctx/span から値を作る遅延評価版) */
@@ -74,23 +74,27 @@ export function mathFn(name: string, wgslName: string, arity: number, result: "s
   });
 }
 
-/** shape/field の座標を f: p → p' で変換する(warp の実体) */
+/** shape/field の座標を f: p → p' で変換する(warp の実体)。
+ * 座標変換は dist/colour を両方変えるので、sprite/strip2D(集約前の単項マーカー、
+ * 「中心・半径・制御点が座標に依存しない」前提)は一般には安全に持ち越せない
+ * (warp は任意関数なので move のような特別扱いができない) —— 明示的に落とし、
+ * SDF へ安全にフォールバックする。move はこの後で自分の平行移動ぶんだけ
+ * sprite.center を追従させて付け直す(shapes.ts) */
 export function warpValue(ctx: Ctx, f: (c: Ctx, p: VVec, s: Span) => VVec, target: Value, span: Span, distScale?: NodeId): Value {
   if (target.v === "shape") {
     const sh = target;
-    return {
-      v: "shape",
-      dim: sh.dim,
-      dist: (c, p, s) => {
+    return liftDist(
+      sh,
+      (c, p, s) => {
         const d = sh.dist(c, f(c, p, s), s);
         return distScale ? num(c.arena.node({ k: "bin", op: "*", a: d.ir, b: distScale, t: "f32" })) : d;
       },
-      colour: (c, p, s) => sh.colour(c, f(c, p, s), s),
-    } as VShape;
+      { colour: (c, p, s) => sh.colour(c, f(c, p, s), s), sprite: undefined, strip2D: undefined },
+    );
   }
   if (target.v === "field" || target.v === "sim") {
     const fl = toField(ctx, target, span);
-    return { v: "field", dim: fl.dim, fn: (c, p, s) => fl.fn(c, f(c, p, s), s) } as VField;
+    return liftField(fl, (c, p, s) => fl.fn(c, f(c, p, s), s));
   }
   if (target.v === "pat") {
     // パターンはその場で展開してから変形する(cycle ... |> morph ... |> rot ... の形)

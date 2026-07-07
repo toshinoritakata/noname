@@ -1,6 +1,6 @@
 // 2D/3D 形状 + warp 族 + 形状合成(元 stdlib.ts 860-1186行)。
 
-import { asNum, asVec, call, constF, constVec, fail, mixValue, num, toField, toShape, vecV } from "../ops.ts";
+import { asNum, asVec, call, constF, constVec, fail, liftDist, mixValue, num, toField, toShape, vecV } from "../ops.ts";
 import { vecType } from "../ir.ts";
 import type { Dim, VShape } from "../value.ts";
 import { bi, binIR, defaultColour, rec, shape, warpValue } from "./shared.ts";
@@ -241,16 +241,16 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("distort", 2, (ctx, [f, x], span) => {
       const sh = toShape(ctx, x, span);
       const df = toField(ctx, f, span);
-      return {
-        v: "shape",
-        dim: sh.dim,
-        dist: (c, p, s) => {
+      return liftDist(
+        sh,
+        (c, p, s) => {
           const d = sh.dist(c, p, s);
           const o = asNum(df.fn(c, p, s), s);
           return num(binIR(c, "+", d.ir, o.ir, "f32"));
         },
-        colour: sh.colour,
-      } as VShape;
+        // 任意の場で dist をずらすので、sprite/strip2D の「座標非依存」前提を保証できない
+        { sprite: undefined, strip2D: undefined },
+      );
     }),
   );
 
@@ -260,6 +260,11 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("cut", 2, (ctx, [tool, base], span) => {
       const a = toShape(ctx, base, span);
       const b = toShape(ctx, tool, span);
+      // spriteBatches/stripBatches(集約後)は shapeUnion と同じ理由で無条件で継承する
+      // (max による CSG は「実体のある側」の dist=+∞ をそのまま素通しするので安全)。
+      // sprite/strip2D は2項combinatorで意味が壊れるため明示的に落とす
+      const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
+      const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
       return {
         v: "shape",
         dim: a.dim === 0 ? b.dim : a.dim,
@@ -268,6 +273,10 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
           return num(call(c, "max", [a.dist(c, p, s).ir, nb], "f32"));
         },
         colour: a.colour,
+        sprite: undefined,
+        strip2D: undefined,
+        spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
+        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
       } as VShape;
     }),
   );
@@ -276,11 +285,17 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("inter", 2, (ctx, [x, y], span) => {
       const a = toShape(ctx, x, span);
       const b = toShape(ctx, y, span);
+      const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
+      const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
       return {
         v: "shape",
         dim: a.dim === 0 ? b.dim : a.dim,
         dist: (c, p, s) => num(call(c, "max", [a.dist(c, p, s).ir, b.dist(c, p, s).ir], "f32")),
         colour: a.colour,
+        sprite: undefined,
+        strip2D: undefined,
+        spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
+        stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
       } as VShape;
     }),
   );
@@ -331,18 +346,20 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("outline", 2, (ctx, [w, x], span) => {
       const wn = asNum(w, span);
       const sh = toShape(ctx, x, span);
-      const result: VShape = {
-        v: "shape",
-        dim: sh.dim,
-        dist: (c, p, s) => {
+      return liftDist(
+        sh,
+        (c, p, s) => {
           const d = call(c, "abs", [sh.dist(c, p, s).ir], "f32");
           return num(binIR(c, "-", d, wn.ir, "f32"));
         },
-        colour: sh.colour,
-      };
-      // line/bezier のストリップ描画マーカー(ADR-0016): 幅を設定して引き継ぐ
-      if (sh.strip2D) result.strip2D = { ...sh.strip2D, width: wn };
-      return result;
+        {
+          // outline は abs(d)-w で「点」を帯に太らせるので、sprite(塗りつぶし円板の
+          // instanced 描画)の前提と食い違う —— 明示的に落とす。line/bezier の
+          // strip2D(ADR-0016)だけは幅を更新しつつ引き継ぐ
+          sprite: undefined,
+          strip2D: sh.strip2D ? { ...sh.strip2D, width: wn } : undefined,
+        },
+      );
     }),
   );
 }
