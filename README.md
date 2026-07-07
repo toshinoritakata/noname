@@ -3,10 +3,21 @@
 creative coding 向けのライブコーディング言語と、その TypeScript 実装(コンパイラ + WebGPU ランタイム)。
 
 ```
-out (circle (0.3 + 0.1 * sin time) |> fill white) <> 0.5s
+balls = range 16
+  |> map \i ->
+       sphere 0.22
+       |> move [ cos (i * 0.8 + time * 0.6) * 1.2
+               , sin (i * 0.5 + time * 0.6) * 1.2
+               , 0 ]
+       |> fill (hsv (i * 0.2) 0.75 1.0)
+       |> glow 0.2
+  |> blendAll 0.3
+
+out (render (orbit 4 7) (balls |> shade (sun [1,1,1]))
+     |> bloom 0.9)
 ```
 
-![デモ: 上のコード(脈打つ円)をそのまま実行した様子](assets/demo.webp)
+![デモ: 上のコード(blendAll によるメタボール + bloom)をそのまま実行した様子](assets/demo.webp)
 
 **[Live Demo](https://toshinoritakata.github.io/noname/)** — WebGPU対応ブラウザならインストール不要でその場で触れる。
 
