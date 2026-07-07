@@ -26,6 +26,7 @@ export interface CompiledPass {
     | "raymarch"
     | "sprite"
     | "strip"
+    | "strip3d"
     | "image"
     | "bloom-extract"
     | "bloom-down"
@@ -48,6 +49,11 @@ export interface CompiledPass {
   /** strip パス: インスタンス数と頂点数(implementation.md 追加、ADR-0016)。最終画像に直接描く */
   stripCount?: number;
   stripVertexCount?: number;
+  /** strip3d パス: 描画先の raymarch id・インスタンス数・頂点数(ADR-0036)。
+   * sprite と同じく深度テストなしでレイマーチ結果に重ね描きする */
+  strip3RmId?: number;
+  strip3Count?: number;
+  strip3VertexCount?: number;
   /** bloom-*: 対応する BloomPassSpec の id、出力テクスチャキー、解像度の分母(ADR-0019) */
   bloomId?: number;
   bloomOutKey?: string;
@@ -1040,6 +1046,9 @@ export function generateWGSL(staged: StagedProgram): CompiledProgram {
   for (const r of raymarches) allRoots.push(r.dist, r.colour, r.eye, r.target, r.fov);
   for (const d of dataPasses) allRoots.push(...d.roots);
   for (const sb of staged.stripBatches) allRoots.push(sb.p0IR, sb.p1IR, sb.p2IR, sb.widthIR, sb.colourIR);
+  for (const r of raymarches) {
+    for (const sb of r.strip3Batches ?? []) allRoots.push(sb.p0IR, sb.p1IR, sb.p2IR, sb.widthIR, sb.colourIR);
+  }
   for (const b of blooms) allRoots.push(b.extract);
   const inputs = collectInputs(arena, allRoots);
   const literalCount = arena.uniforms.length;
@@ -1297,6 +1306,147 @@ fn fs_main(in: SpriteVOut) -> @location(0) vec4f {
           spriteRmId: rm.id,
           spriteCount: batch.count,
           hash: fnv1a("sprite:" + batch.loopId + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
+          lineSpans: [],
+        });
+      }
+    }
+
+    // ---- Strip3D パス(3D line/bezier の instanced 描画。ADR-0036) ----
+    // sprite(ADR-0014)と同じく、march 不要・深度テストなし・レイマーチ結果に
+    // 重ね描き。カメラ向きのリボン(進行方向と視線方向の外積で幅方向を決める)を
+    // 1ベジエ STRIP3D_SEGMENTS 個の直線に分割して近似する(2D strip と同じ手法)
+    const STRIP3D_SEGMENTS = 16;
+    for (const batch of rm.strip3Batches ?? []) {
+      const dataKey = `strip3:${batch.loopId}`;
+      {
+        // データパス: tex0=vec4(p0,width), tex1=vec4(p1,0), tex2=vec4(p2,0), tex3=colour
+        const cg2 = new Codegen(arena, layout, inputIndex);
+        const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+        const coord2 = arena.node({ k: "coord", t: "vec2" });
+        scope.names.set(coord2, "P");
+        const idxNode = arena.node({ k: "swiz", a: coord2, sel: "x", t: "f32" });
+        const loopiNode = arena.node({ k: "loopi", id: batch.loopId, t: "f32" });
+        const substMap = new Map<NodeId, NodeId>([[loopiNode, idxNode]]);
+        const p0 = rewriteDag(arena, batch.p0IR, substMap);
+        const p1 = rewriteDag(arena, batch.p1IR, substMap);
+        const p2 = rewriteDag(arena, batch.p2IR, substMap);
+        const width = rewriteDag(arena, batch.widthIR, substMap);
+        const colour = rewriteDag(arena, batch.colourIR, substMap);
+        const zero = arena.node({ k: "const", v: 0, t: "f32" });
+        const tex0 = arena.node({ k: "vec", parts: [p0, width], t: "vec4" });
+        const tex1 = arena.node({ k: "vec", parts: [p1, zero], t: "vec4" });
+        const tex2 = arena.node({ k: "vec", parts: [p2, zero], t: "vec4" });
+        const out0 = cg2.emit(tex0, scope);
+        const out1 = cg2.emit(tex1, scope);
+        const out2 = cg2.emit(tex2, scope);
+        const out3 = cg2.emit(colour, scope);
+        const fs2 = `@fragment
+fn fs_main(@builtin(position) pos: vec4f) -> FsOut {
+  let P = vec2f(floor(pos.x), 0.0);
+${scope.lines.join("\n")}
+  var o: FsOut;
+  o.c0 = ${out0};
+  o.c1 = ${out1};
+  o.c2 = ${out2};
+  o.c3 = ${out3};
+  return o;
+}`;
+        const code2 = assemble(cg2, "", fs2, 4, ffiSrcs);
+        passes.push({
+          kind: "data",
+          code: code2,
+          targets: 4,
+          textures: cg2.usedTex,
+          dataKey,
+          dataCount: batch.count,
+          hash: fnv1a(
+            "strip3-data:" + arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]) + ":" + inputs.join(","),
+          ),
+          lineSpans: [],
+        });
+      }
+      {
+        const cg3 = new Codegen(arena, layout, inputIndex);
+        const tex0 = cg3.texture(`${dataKey}:0`);
+        const tex1 = cg3.texture(`${dataKey}:1`);
+        const tex2 = cg3.texture(`${dataKey}:2`);
+        const tex3 = cg3.texture(`${dataKey}:3`);
+        const camScope4: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+        const eye4 = cg3.emit(rm.eye, camScope4);
+        const target4 = cg3.emit(rm.target, camScope4);
+        const fov4 = cg3.emit(rm.fov, camScope4);
+        const segs = STRIP3D_SEGMENTS;
+        const vs = `struct Strip3VOut {
+  @builtin(position) pos: vec4f,
+  @location(0) cross_: f32,
+  @location(1) col: vec4f,
+}
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Strip3VOut {
+  let t0 = textureLoad(${tex0}, vec2i(i32(ii), 0), 0);
+  let t1 = textureLoad(${tex1}, vec2i(i32(ii), 0), 0);
+  let t2 = textureLoad(${tex2}, vec2i(i32(ii), 0), 0);
+  let col = textureLoad(${tex3}, vec2i(i32(ii), 0), 0);
+  let p0 = t0.xyz;
+  let width = t0.w;
+  let p1 = t1.xyz;
+  let p2 = t2.xyz;
+  let seg = i32(vi) / 2;
+  let side = f32(i32(vi) % 2) * 2.0 - 1.0; // -1 or 1
+  let t = f32(seg) / f32(${segs});
+  let u = 1.0 - t;
+  // 2次ベジエの点と接線(line は p1=中点の退化ベジエ)
+  let point = u * u * p0 + 2.0 * u * t * p1 + t * t * p2;
+  var tangent = 2.0 * u * (p1 - p0) + 2.0 * t * (p2 - p1);
+  if (dot(tangent, tangent) < 1e-12) { tangent = p2 - p0; }
+  tangent = normalize(tangent);
+${camScope4.lines.join("\n")}
+  let ro = ${eye4};
+  let ta = ${target4};
+  let fw = normalize(ta - ro);
+  let ri = normalize(cross(fw, vec3f(0.0, 1.0, 0.0)));
+  let up = cross(ri, fw);
+  let th = tan(${fov4} * 0.5);
+  let res = U.header.xy;
+  let aspect = res.x / max(res.y, 1.0);
+  // カメラ向きのリボン: 幅方向 = 接線 × 視線方向(退化(接線とほぼ平行な視線)は
+  // カメラの right ベクトルにフォールバックする)
+  let viewDir = normalize(point - ro);
+  var right = cross(tangent, viewDir);
+  if (dot(right, right) < 1e-12) { right = ri; }
+  right = normalize(right);
+  let halfw = max(width, 0.0005);
+  let worldPos = point + right * side * halfw;
+  let rel = worldPos - ro;
+  let vfwd = dot(rel, fw);
+  let vright = dot(rel, ri);
+  let vup = dot(rel, up);
+  var out: Strip3VOut;
+  if (vfwd <= 0.001) {
+    out.pos = vec4f(2.0, 2.0, 2.0, 1.0); // カメラ背後は画角外に押し出す(depth test なしの簡易カリング、sprite と同じ)
+  } else {
+    let ndc = vec2f(vright / (vfwd * th * aspect), vup / (vfwd * th));
+    out.pos = vec4f(ndc, 0.5, 1.0);
+  }
+  out.cross_ = side;
+  out.col = col;
+  return out;
+}`;
+        const fs3 = `@fragment
+fn fs_main(in: Strip3VOut) -> @location(0) vec4f {
+  let cov = smoothstep(1.0, 0.7, abs(in.cross_)) * in.col.w;
+  return vec4f(in.col.rgb * cov, cov);
+}`;
+        const code3 = assemble(cg3, "", fs3, 1, ffiSrcs, vs);
+        passes.push({
+          kind: "strip3d",
+          code: code3,
+          targets: 1,
+          textures: cg3.usedTex,
+          strip3RmId: rm.id,
+          strip3Count: batch.count,
+          strip3VertexCount: 2 * (segs + 1),
+          hash: fnv1a("strip3:" + batch.loopId + ":" + segs + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
           lineSpans: [],
         });
       }

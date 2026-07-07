@@ -122,6 +122,18 @@ export interface VShape {
    * として直接ラスタライズする(march 不要。ADR-0016)
    */
   stripBatches?: StripBatchSpec[];
+  /**
+   * 3D の line/bezier 用マーカー(strip2D の3D版、ADR-0036)。p0/p1/p2 はvec3の
+   * 2次ベジエ制御点(line は p1=中点の退化ベジエ)。sprite と同じく深度テストなしの
+   * カメラ向きビルボード(リボン)描画に昇格する。move/fill/glow/outline 以外の
+   * 合成子は引き継がない(= 安全に SDF レイマーチへフォールバック)
+   */
+  strip3D?: { p0: VVec; p1: VVec; p2: VVec; width: VNum; colour: VVec };
+  /**
+   * 集約後(loopShape 後)の3Dストリップバッチ群。render() がこれを見つけたら
+   * 専用の instanced strip3d パスで(sprite と同じく深度テストなしのビルボードとして)描く
+   */
+  strip3Batches?: Strip3BatchSpec[];
 }
 
 /** scatter が生成する1バッチぶんのインスタンス記述(implementation.md 追加、ADR-0014) */
@@ -141,6 +153,17 @@ export interface StripBatchSpec {
   p0IR: NodeId; // vec2
   p1IR: NodeId; // vec2(制御点。line は中点)
   p2IR: NodeId; // vec2
+  widthIR: NodeId; // f32
+  colourIR: NodeId; // vec4
+}
+
+/** scatter が生成する1バッチぶんの3D line/bezier インスタンス記述(ADR-0036) */
+export interface Strip3BatchSpec {
+  count: number;
+  loopId: number;
+  p0IR: NodeId; // vec3
+  p1IR: NodeId; // vec3(制御点。line は中点)
+  p2IR: NodeId; // vec3
   widthIR: NodeId; // f32
   colourIR: NodeId; // vec4
 }
@@ -238,6 +261,8 @@ export interface RaymarchPassSpec {
   span: Span;
   /** scatter 由来のスプライトバッチ(あれば instanced pass で別描画。ADR-0014) */
   spriteBatches?: SpriteBatchSpec[];
+  /** scatter 由来の3D line/bezier ストリップバッチ(あれば instanced pass で別描画。ADR-0036) */
+  strip3Batches?: Strip3BatchSpec[];
 }
 
 /**

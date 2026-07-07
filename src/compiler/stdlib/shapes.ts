@@ -81,6 +81,10 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
         // ストリップ描画マーカー(ADR-0016)。line は制御点=中点の退化ベジエとして扱う
         const mid = vecV(2, binIR(ctx, "*", binIR(ctx, "+", a.ir, b.ir, "vec2"), constF(ctx, 0.5).ir, "vec2"));
         sh.strip2D = { p0: a, p1: mid, p2: b, width: constF(ctx, 0), colour: defaultColour(ctx) };
+      } else {
+        // 3Dストリップ描画マーカー(ADR-0036)。2Dと同じく中点=退化ベジエ
+        const mid = vecV(3, binIR(ctx, "*", binIR(ctx, "+", a.ir, b.ir, "vec3"), constF(ctx, 0.5).ir, "vec3"));
+        sh.strip3D = { p0: a, p1: mid, p2: b, width: constF(ctx, 0), colour: defaultColour(ctx) };
       }
       return sh;
     }),
@@ -100,6 +104,8 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
       const sh = shape(dim, (c, p) => num(call(c, fn, [p.ir, a.ir, b.ir, cc.ir], "f32")));
       if (a.n === 2) {
         sh.strip2D = { p0: a, p1: b, p2: cc, width: constF(ctx, 0), colour: defaultColour(ctx) };
+      } else {
+        sh.strip3D = { p0: a, p1: b, p2: cc, width: constF(ctx, 0), colour: defaultColour(ctx) };
       }
       return sh;
     }),
@@ -288,8 +294,8 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
           const o = asNum(df.fn(c, p, s), s);
           return num(binIR(c, "+", d.ir, o.ir, "f32"));
         },
-        // 任意の場で dist をずらすので、sprite/strip2D の「座標非依存」前提を保証できない
-        { sprite: undefined, strip2D: undefined },
+        // 任意の場で dist をずらすので、sprite/strip2D/strip3D の「座標非依存」前提を保証できない
+        { sprite: undefined, strip2D: undefined, strip3D: undefined },
       );
     }),
   );
@@ -300,11 +306,13 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
     bi("cut", 2, (ctx, [tool, base], span) => {
       const a = toShape(ctx, base, span);
       const b = toShape(ctx, tool, span);
-      // spriteBatches/stripBatches(集約後)は shapeUnion と同じ理由で無条件で継承する
-      // (max による CSG は「実体のある側」の dist=+∞ をそのまま素通しするので安全)。
-      // sprite/strip2D は2項combinatorで意味が壊れるため明示的に落とす
+      // spriteBatches/stripBatches/strip3Batches(集約後)は shapeUnion と同じ理由で
+      // 無条件で継承する(max による CSG は「実体のある側」の dist=+∞ をそのまま
+      // 素通しするので安全)。sprite/strip2D/strip3D は2項combinatorで意味が壊れる
+      // ため明示的に落とす
       const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
       const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
+      const strip3Batches = [...(a.strip3Batches ?? []), ...(b.strip3Batches ?? [])];
       return {
         v: "shape",
         dim: a.dim === 0 ? b.dim : a.dim,
@@ -315,8 +323,10 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
         colour: a.colour,
         sprite: undefined,
         strip2D: undefined,
+        strip3D: undefined,
         spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
         stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+        strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
       } as VShape;
     }),
   );
@@ -327,6 +337,7 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
       const b = toShape(ctx, y, span);
       const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
       const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
+      const strip3Batches = [...(a.strip3Batches ?? []), ...(b.strip3Batches ?? [])];
       return {
         v: "shape",
         dim: a.dim === 0 ? b.dim : a.dim,
@@ -334,8 +345,10 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
         colour: a.colour,
         sprite: undefined,
         strip2D: undefined,
+        strip3D: undefined,
         spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
         stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+        strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
       } as VShape;
     }),
   );
@@ -395,9 +408,10 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
         {
           // outline は abs(d)-w で「点」を帯に太らせるので、sprite(塗りつぶし円板の
           // instanced 描画)の前提と食い違う —— 明示的に落とす。line/bezier の
-          // strip2D(ADR-0016)だけは幅を更新しつつ引き継ぐ
+          // strip2D/strip3D(ADR-0016/0036)だけは幅を更新しつつ引き継ぐ
           sprite: undefined,
           strip2D: sh.strip2D ? { ...sh.strip2D, width: wn } : undefined,
+          strip3D: sh.strip3D ? { ...sh.strip3D, width: wn } : undefined,
         },
       );
     }),

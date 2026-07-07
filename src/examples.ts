@@ -294,4 +294,21 @@ out (circle (0.3 + 0.05 * sin time)
 
 out (pat |> glitch (0.3 + 0.2 * sin (time * 0.7)))`,
   },
+  {
+    name: "22. 3Dワイヤーフレーム (line/bezier 3D対応)",
+    source: `strands = scatter 200 \\i ->
+  let a0 = hash i * 6.283185
+      a1 = hash (i + 500) * 6.283185
+      r0 = 0.8 + hash (i + 1000) * 0.6
+      r1 = 0.8 + hash (i + 1500) * 0.6
+      p0 = [cos a0 * r0, sin (a0 * 2.0) * 0.6, sin a0 * r0]
+      p1 = [cos a1 * r1, sin (a1 * 2.0) * 0.6, sin a1 * r1]
+      mid = (p0 + p1) * 0.5 + [0, sin (time * 0.3 + i) * 0.2, 0]
+  in bezier p0 mid p1
+     |> outline 0.008
+     |> fill (hsv (hash (i + 2000)) 0.6 1)
+     |> glow 0.4
+
+out (render (orbit 5 (time * 0.1)) strands)`,
+  },
 ];

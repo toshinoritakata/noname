@@ -42,12 +42,14 @@ export function installColor(add: AddFn, addV: AddVFn): void {
           colour: (c, p, s) => asColor(c, cf.fn(c, p, s), s),
           sprite: undefined,
           strip2D: undefined,
+          strip3D: undefined,
         } as VShape;
       }
       const col = asColor(ctx, colV, span);
       const result = { ...sh, colour: () => col } as VShape;
       if (sh.sprite) result.sprite = { ...sh.sprite, colour: col };
       if (sh.strip2D) result.strip2D = { ...sh.strip2D, colour: col };
+      if (sh.strip3D) result.strip3D = { ...sh.strip3D, colour: col };
       return result;
     }),
   );
@@ -117,14 +119,22 @@ export function installColor(add: AddFn, addV: AddVFn): void {
           const a = c.arena.node({ k: "swiz", a: base.ir, sel: "w", t: "f32" });
           return vecV(4, c.arena.node({ k: "vec", parts: [brightened, a], t: "vec4" }));
         },
-        strip2D: undefined, // ストリップ描画は未対応(安全に SDF フォールバック)
+        strip2D: undefined, // 2Dストリップ描画は未対応(安全に SDF フォールバック)
+        strip3D: undefined,
       } as VShape;
-      // glow の明るさ変換は座標に依存しないので、スプライト色にも同じ式を適用して伝播する
+      // glow の明るさ変換は座標に依存しないので、スプライト/3Dストリップの色にも
+      // 同じ式を適用して伝播する(sprite と同じ instanced・深度テストなしの描画のため)
       if (sh.sprite) {
         const boost = boostOf(ctx, kn.ir);
         const rgb = binIR(ctx, "*", ctx.arena.node({ k: "swiz", a: sh.sprite.colour.ir, sel: "xyz", t: "vec3" }), boost, "vec3");
         const a = ctx.arena.node({ k: "swiz", a: sh.sprite.colour.ir, sel: "w", t: "f32" });
         result.sprite = { ...sh.sprite, colour: vecV(4, ctx.arena.node({ k: "vec", parts: [rgb, a], t: "vec4" })) };
+      }
+      if (sh.strip3D) {
+        const boost = boostOf(ctx, kn.ir);
+        const rgb = binIR(ctx, "*", ctx.arena.node({ k: "swiz", a: sh.strip3D.colour.ir, sel: "xyz", t: "vec3" }), boost, "vec3");
+        const a = ctx.arena.node({ k: "swiz", a: sh.strip3D.colour.ir, sel: "w", t: "f32" });
+        result.strip3D = { ...sh.strip3D, colour: vecV(4, ctx.arena.node({ k: "vec", parts: [rgb, a], t: "vec4" })) };
       }
       return result;
     }),

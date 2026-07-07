@@ -1,0 +1,6 @@
+== raymarch 0
+dist = #1000000000
+colour = vec4(#0, #0, #0, #0)
+eye = vec3((u47(5) * cos((time * u48(0.1)))), (u47(5) * #0.4), (u47(5) * sin((time * u48(0.1)))))
+== image
+sample[rm:0](worldToUv(p))

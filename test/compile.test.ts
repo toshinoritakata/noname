@@ -128,6 +128,49 @@ test("scatter が strip 経路に昇格すれば警告は出ない", () => {
   assert.ok(!r.diagnostics.some((d) => /instanced 描画に昇格せず/.test(d.message)), JSON.stringify(r.diagnostics));
 });
 
+test("3D line/bezier の scatter は strip3d 経路に昇格し、警告は出ない(ADR-0036)", () => {
+  const r = compile(`scene = scatter 100 \\i ->
+    line [hash i, hash (i+1), hash (i+2)] [hash (i+3), hash (i+4), hash (i+5)]
+    |> outline 0.02
+    |> fill white
+
+out (render (orbit 4 0) scene)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(!r.diagnostics.some((d) => /instanced 描画に昇格せず/.test(d.message)), JSON.stringify(r.diagnostics));
+  assert.ok(r.program!.passes.some((p) => p.kind === "strip3d"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
+});
+
+test("3D bezier の scatter も strip3d 経路に昇格する", () => {
+  const r = compile(`scene = scatter 100 \\i ->
+    bezier [hash i, hash (i+1), hash (i+2)] [hash (i+3), hash (i+4), hash (i+5)] [hash (i+6), hash (i+7), hash (i+8)]
+    |> outline 0.02
+    |> fill (hsv (hash i) 0.6 1)
+    |> glow 0.5
+
+out (render (orbit 4 0) scene)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(r.program!.passes.some((p) => p.kind === "strip3d"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
+});
+
+test("scatter した3D lineに rot を挟むと strip3d に昇格せず警告が出る", () => {
+  const r = compile(`scene = scatter 100 \\i ->
+    line [hash i, hash (i+1), hash (i+2)] [hash (i+3), hash (i+4), hash (i+5)]
+    |> outline 0.02
+    |> rotY (hash i)
+    |> fill white
+
+out (render (orbit 4 0) scene)`);
+  assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
+  assert.ok(r.program);
+  assert.ok(
+    r.diagnostics.some((d) => d.severity === "warning" && /instanced 描画に昇格せず/.test(d.message)),
+    JSON.stringify(r.diagnostics),
+  );
+  assert.ok(!r.program!.passes.some((p) => p.kind === "strip3d"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
+});
+
 test("glitch は image パスにコンパイルされる", () => {
   const r = compile(`out (circle 0.3 |> fill white |> glitch 0.5)`);
   assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));

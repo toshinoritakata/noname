@@ -104,6 +104,7 @@ export function installPhysics3D(add: AddFn, addV: AddVFn): void {
         fov: camV.fov.ir,
         span,
         spriteBatches: sh.spriteBatches,
+        strip3Batches: sh.strip3Batches,
       });
       return {
         v: "field",

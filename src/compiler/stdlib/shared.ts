@@ -75,7 +75,7 @@ export function mathFn(name: string, wgslName: string, arity: number, result: "s
 }
 
 /** shape/field の座標を f: p → p' で変換する(warp の実体)。
- * 座標変換は dist/colour を両方変えるので、sprite/strip2D(集約前の単項マーカー、
+ * 座標変換は dist/colour を両方変えるので、sprite/strip2D/strip3D(集約前の単項マーカー、
  * 「中心・半径・制御点が座標に依存しない」前提)は一般には安全に持ち越せない
  * (warp は任意関数なので move のような特別扱いができない) —— 明示的に落とし、
  * SDF へ安全にフォールバックする。move はこの後で自分の平行移動ぶんだけ
@@ -89,7 +89,7 @@ export function warpValue(ctx: Ctx, f: (c: Ctx, p: VVec, s: Span) => VVec, targe
         const d = sh.dist(c, f(c, p, s), s);
         return distScale ? num(c.arena.node({ k: "bin", op: "*", a: d.ir, b: distScale, t: "f32" })) : d;
       },
-      { colour: (c, p, s) => sh.colour(c, f(c, p, s), s), sprite: undefined, strip2D: undefined },
+      { colour: (c, p, s) => sh.colour(c, f(c, p, s), s), sprite: undefined, strip2D: undefined, strip3D: undefined },
     );
   }
   if (target.v === "field" || target.v === "sim") {

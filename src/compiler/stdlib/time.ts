@@ -42,12 +42,17 @@ function timeWarp(ctx: Ctx, x: Value, remap: (c: Ctx, t: NodeId) => NodeId, span
     case "shape": {
       const sh = x;
       // dist/colour の IR 中の time 参照を差し替えるだけで、座標や個体の同一性は
-      // 変えない。sprite/strip2D(単項マーカー)は warpValue と同じ理由で明示的に
+      // 変えない。sprite/strip2D/strip3D(単項マーカー)は warpValue と同じ理由で明示的に
       // 落とす(中の time 依存式まで追って書き換えるのは今はやらない、安全フォールバック)
       return liftDist(
         sh,
         (c, p, s) => num(apply(sh.dist(c, p, s).ir)),
-        { colour: (c, p, s) => vecV(4, apply(sh.colour(c, p, s).ir)), sprite: undefined, strip2D: undefined },
+        {
+          colour: (c, p, s) => vecV(4, apply(sh.colour(c, p, s).ir)),
+          sprite: undefined,
+          strip2D: undefined,
+          strip3D: undefined,
+        },
       );
     }
     default:

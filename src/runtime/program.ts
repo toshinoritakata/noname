@@ -189,10 +189,12 @@ export class ProgramSlot {
    * layout:"auto" は未使用バインディングを刈り取るため、bind group 側と食い違う。
    */
   private bindGroupLayout(texCount: number, kind: CompiledPass["kind"]): GPUBindGroupLayout {
-    // sprite(ADR-0014)/strip(ADR-0016)パスは頂点シェーダで uniform とテクスチャを
-    // 読むため、頂点段も可視にする
+    // sprite(ADR-0014)/strip(ADR-0016)/strip3d(ADR-0036)パスは頂点シェーダで
+    // uniform とテクスチャを読むため、頂点段も可視にする
     const vis =
-      kind === "sprite" || kind === "strip" ? GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT : GPUShaderStage.FRAGMENT;
+      kind === "sprite" || kind === "strip" || kind === "strip3d"
+        ? GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT
+        : GPUShaderStage.FRAGMENT;
     const entries: GPUBindGroupLayoutEntry[] = [
       { binding: 0, visibility: vis, buffer: { type: "uniform" } },
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
@@ -231,9 +233,11 @@ export class ProgramSlot {
     // alpha は max にして 0..1 の被覆率のまま保つ(rgb は加算のまま、密集ほど明るく光る)
     // strip パス(ADR-0016)は line/bezier をラスタライズして最終画像に直接上描きする。
     // フラグメントはあらかじめ premultiplied(rgb*coverage, coverage)で出すので、
-    // 標準の premultiplied-over ブレンドで下地(image パスの出力)に正しく重なる
+    // 標準の premultiplied-over ブレンドで下地(image パスの出力)に正しく重なる。
+    // strip3d パス(ADR-0036)は sprite と同じく深度テストなしでレイマーチ結果に
+    // 重ね描きするので、sprite と同じ加算+maxアルファのブレンドを使う
     const blend: GPUBlendState | undefined =
-      spec.kind === "sprite"
+      spec.kind === "sprite" || spec.kind === "strip3d"
         ? {
             color: { srcFactor: "one", dstFactor: "one", operation: "add" },
             alpha: { srcFactor: "one", dstFactor: "one", operation: "max" },
@@ -250,7 +254,7 @@ export class ProgramSlot {
       layout: this.device.createPipelineLayout({ bindGroupLayouts: [bgl] }),
       vertex: { module, entryPoint: "vs_main" },
       fragment: { module, entryPoint: "fs_main", targets },
-      primitive: { topology: spec.kind === "strip" ? "triangle-strip" : "triangle-list" },
+      primitive: { topology: spec.kind === "strip" || spec.kind === "strip3d" ? "triangle-strip" : "triangle-list" },
     });
   }
 
@@ -354,7 +358,7 @@ export class ProgramSlot {
       const rm = key.match(/^rm:(\d+)$/);
       if (rm) return this.rmTex.get(Number(rm[1]))?.createView() ?? null;
       if (key.startsWith("bloom:")) return this.bloomTex.get(key)?.createView() ?? null;
-      const data = key.match(/^((?:data|sprite|strip):\d+):(\d+)$/);
+      const data = key.match(/^((?:data|sprite|strip3?):\d+):(\d+)$/);
       if (data) return this.dataTex.get(data[1])?.[Number(data[2])]?.createView() ?? null;
       return resolveExtra(key);
     };
@@ -400,6 +404,15 @@ export class ProgramSlot {
       const tex = this.rmTex.get(p.spec.spriteRmId);
       if (!tex) continue;
       this.draw(encoder, p, [tex.createView()], resolve, "load", 6, p.spec.spriteCount ?? 1);
+    }
+
+    // ---- strip3d(3D line/bezier の instanced 描画。sprite と同じくレイマーチ結果に
+    // 深度テストなしで重ね描き。ADR-0036) ----
+    for (const p of this.passes) {
+      if (p.spec.kind !== "strip3d" || p.spec.strip3RmId === undefined || p.spec.strip3VertexCount === undefined) continue;
+      const tex = this.rmTex.get(p.spec.strip3RmId);
+      if (!tex) continue;
+      this.draw(encoder, p, [tex.createView()], resolve, "load", p.spec.strip3VertexCount, p.spec.strip3Count ?? 1);
     }
 
     // ---- bloom(ダウンサンプル+ブラー多パス連鎖。ADR-0019) ----

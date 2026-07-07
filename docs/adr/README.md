@@ -52,6 +52,7 @@
 - [0033](0033-websocket-input-replaces-http-polling.md) — WebSocket 入力(`ws.value`)を追加し、HTTPポーリング(ADR-0031)を置き換える(5秒遅延の解消、URLをUIに置く判断は継承)
 - [0034](0034-glitch-postfx-band-burst.md) — `glitch` は走査線帯×離散時間ステップのバースト発火として実装する(単純な全画面ノイズではなく疎で離散的な発火にする)
 - [0035](0035-scatter-instancing-fallback-warning.md) — `scatter` が instanced 描画に昇格し損ねたら warning 診断を出す(見た目を変えずにO(n)ループへ無警告で転落していた「見えない性能崖」の可視化)
+- [0036](0036-3d-line-bezier-strip-instancing.md) — 3D の line/bezier を sprite と同じ深度テストなしビルボード(カメラ向きリボン)で instanced 描画する(2D限定だったADR-0016を3Dに拡張)
 
 ## 未決(ADR 化待ち)
 

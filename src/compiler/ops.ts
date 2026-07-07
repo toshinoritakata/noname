@@ -398,11 +398,12 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
       const dim = unifyDim(x.dim, y.dim, span);
       const xs = x;
       const ys = y;
-      // spriteBatches/stripBatches(集約後)はどちらの枝が選ばれても無条件で引き継ぐ
-      // (shapeUnion と同じ理由)。sprite/strip2D(集約前の単項マーカー)は二項combinatorで
-      // 意味が壊れるため明示的に落とす(= 安全に SDF フォールバック)
+      // spriteBatches/stripBatches/strip3Batches(集約後)はどちらの枝が選ばれても
+      // 無条件で引き継ぐ(shapeUnion と同じ理由)。sprite/strip2D/strip3D(集約前の
+      // 単項マーカー)は二項combinatorで意味が壊れるため明示的に落とす(= 安全に SDF フォールバック)
       const spriteBatches = [...(xs.spriteBatches ?? []), ...(ys.spriteBatches ?? [])];
       const stripBatches = [...(xs.stripBatches ?? []), ...(ys.stripBatches ?? [])];
+      const strip3Batches = [...(xs.strip3Batches ?? []), ...(ys.strip3Batches ?? [])];
       return {
         v: "shape",
         dim,
@@ -412,8 +413,10 @@ export function selectValue(ctx: Ctx, cond: Value, a: Value, b: Value, span: Spa
           vecV(4, cx.arena.node({ k: "select", c, a: xs.colour(cx, p, s).ir, b: ys.colour(cx, p, s).ir, t: "vec4" })),
         sprite: undefined,
         strip2D: undefined,
+        strip3D: undefined,
         spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
         stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+        strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
       } as VShape;
     }
     fail(`then と else の型が合いません: ${describe(x)} と ${describe(y)}`, span);
@@ -439,10 +442,11 @@ export function mixValue(ctx: Ctx, a: Value, b: Value, t: VNum, span: Span): Val
     const dim = unifyDim(a.dim, b.dim, span);
     const as_ = a;
     const bs = b;
-    // selectValue と同じ理由: spriteBatches/stripBatches は無条件で引き継ぎ、
-    // sprite/strip2D(単項マーカー)は補間で意味が壊れるため明示的に落とす
+    // selectValue と同じ理由: spriteBatches/stripBatches/strip3Batches は無条件で引き継ぎ、
+    // sprite/strip2D/strip3D(単項マーカー)は補間で意味が壊れるため明示的に落とす
     const spriteBatches = [...(as_.spriteBatches ?? []), ...(bs.spriteBatches ?? [])];
     const stripBatches = [...(as_.stripBatches ?? []), ...(bs.stripBatches ?? [])];
+    const strip3Batches = [...(as_.strip3Batches ?? []), ...(bs.strip3Batches ?? [])];
     return {
       v: "shape",
       dim,
@@ -452,8 +456,10 @@ export function mixValue(ctx: Ctx, a: Value, b: Value, t: VNum, span: Span): Val
         vecV(4, call(c, "mix", [as_.colour(c, p, s).ir, bs.colour(c, p, s).ir, t.ir], "vec4")),
       sprite: undefined,
       strip2D: undefined,
+      strip3D: undefined,
       spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
       stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+      strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
     } as VShape;
   }
   if (a.v === "num" && b.v === "num") {
@@ -496,9 +502,16 @@ export function liftField(base: VField, fn: VField["fn"], dim: Dim = base.dim): 
 export function liftDist(
   base: VShape,
   dist: VShape["dist"],
-  opts: { colour?: VShape["colour"]; sprite: VShape["sprite"]; strip2D: VShape["strip2D"] },
+  opts: { colour?: VShape["colour"]; sprite: VShape["sprite"]; strip2D: VShape["strip2D"]; strip3D: VShape["strip3D"] },
 ): VShape {
-  return { ...base, dist, colour: opts.colour ?? base.colour, sprite: opts.sprite, strip2D: opts.strip2D };
+  return {
+    ...base,
+    dist,
+    colour: opts.colour ?? base.colour,
+    sprite: opts.sprite,
+    strip2D: opts.strip2D,
+    strip3D: opts.strip3D,
+  };
 }
 
 export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
@@ -510,6 +523,7 @@ export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
   // (集約前の sprite/strip2D と違い、dist の SDF フォールバックが存在しないため)
   const spriteBatches = [...(a.spriteBatches ?? []), ...(b.spriteBatches ?? [])];
   const stripBatches = [...(a.stripBatches ?? []), ...(b.stripBatches ?? [])];
+  const strip3Batches = [...(a.strip3Batches ?? []), ...(b.strip3Batches ?? [])];
   return {
     v: "shape",
     dim,
@@ -528,6 +542,7 @@ export function shapeUnion(ctx: Ctx, a: VShape, b: VShape, span: Span): VShape {
     },
     spriteBatches: spriteBatches.length > 0 ? spriteBatches : undefined,
     stripBatches: stripBatches.length > 0 ? stripBatches : undefined,
+    strip3Batches: strip3Batches.length > 0 ? strip3Batches : undefined,
   };
 }
 

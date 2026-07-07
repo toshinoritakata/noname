@@ -140,8 +140,8 @@ Cam, Dur(時間リテラルの型)
 | `box s` | `Vec d -> Shape d` | 軸並行な箱。`s` は半径ベクトル(2Dなら vec2, 3Dなら vec3)。スカラーも可(正方形/立方体) |
 | `tri r` | `Float -> Shape2` | 正三角形(外接半径 `r`) |
 | `point r` | `Float -> Shape d` | 点(円/球と同じ距離式。`scatter` でのインスタンス化検出の起点。ADR-0014) |
-| `line a b` | `Vec d -> Vec d -> Shape d` | 2点間の**距離ゼロの線分**(パス上で厳密に0)。太さは `outline` で与える。2D は三角形ストリップで直接ラスタライズ(ADR-0016)、3D は SDF |
-| `bezier a b c` | `Vec d -> Vec d -> Vec d -> Shape d` | 2次ベジエ曲線(距離ゼロ)。2D は厳密解析距離+strip描画、3D は3点が張る平面へ投影した厳密距離(SDF、ADR-0015) |
+| `line a b` | `Vec d -> Vec d -> Shape d` | 2点間の**距離ゼロの線分**(パス上で厳密に0)。太さは `outline` で与える。`scatter` で `outline w \|> fill c` の連鎖にすると2D/3Dともinstanced描画に昇格する(2D: 三角形ストリップ、ADR-0016。3D: カメラ向きビルボード、深度テストなし、ADR-0036) |
+| `bezier a b c` | `Vec d -> Vec d -> Vec d -> Shape d` | 2次ベジエ曲線(距離ゼロ)。2D は厳密解析距離、3D は3点が張る平面へ投影した厳密距離(SDF、ADR-0015)。instanced描画の条件は `line` と同じ |
 | `plane.x h` / `.y h` / `.z h` | `Float -> Shape3` | 軸に垂直な無限平面(`plane` はレコード) |
 | `heightfield f` | `(Vec2 -> Float) -> Shape3` | 高さ場から3D SDFを作る(`f p` が p での高さ)。Lipschitz安全係数0.6を内蔵 |
 | `stripes n` | `Float -> Field2 Float` | 縦縞パターン(0..1)。図形ではなく場 |
@@ -357,9 +357,12 @@ name = wgsl (型注釈) """
 
 ## 8. 未対応・既知の制限
 
-- 3D の `line`/`bezier` の instanced 描画(2Dのみ対応、ADR-0016)
-- `line`/`bezier` の instanced 描画は `outline |> fill` の連鎖のみ検出
-  (`move`/`glow` 等は未対応、SDFへ安全にフォールバック)
+- `line`/`bezier` の instanced 描画は `outline |> fill`(3Dは`|> glow`も可、
+  ADR-0036)の連鎖のみ検出。`move`等それ以外の合成子を挟むとSDFへ安全に
+  フォールバックする(見た目は変わらないが、`scatter`の大きなNではADR-0035
+  の警告診断が出る)
+- 3Dのstrip instanced描画(ADR-0036)は sprite(ADR-0014)と同じく深度
+  テストを行わない。不透明な物体との前後関係が正しく出ない場合がある
 - 半透明な3D図形の合成(`blendAll` ループ版は colour.a=1 を仮定)
 - Tidal級のパターン代数(`cycle`/`every` の式展開のみ。ADR-0013)
 - bbox・組合せ展開・汎用JS FFI は意図的に不採用(ADR-0013)

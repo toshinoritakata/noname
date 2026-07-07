@@ -16,7 +16,7 @@ import {
   toShape,
   vecV,
 } from "../ops.ts";
-import type { Ctx, SpriteBatchSpec, StripBatchSpec, Value, VBuiltin, VList, VNum, VShape, VVec } from "../value.ts";
+import type { Ctx, SpriteBatchSpec, Strip3BatchSpec, StripBatchSpec, Value, VBuiltin, VList, VNum, VShape, VVec } from "../value.ts";
 import { bi, binIR } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 
@@ -120,7 +120,35 @@ export function loopShape(ctx: Ctx, n: number, gen: (i: VNum) => VShape, span: S
         };
       }
     }
-    // ここまで来た = instanced 描画(ADR-0014/0016)に昇格せず、以下の O(n) SDF
+    if (probe.strip3D) {
+      const id = ctx.arena.freshLoopId();
+      const iNode = ctx.arena.node({ k: "loopi", id, t: "f32" });
+      const real = gen(num(iNode));
+      if (real.strip3D) {
+        const batch: Strip3BatchSpec = {
+          count: n,
+          loopId: id,
+          p0IR: real.strip3D.p0.ir,
+          p1IR: real.strip3D.p1.ir,
+          p2IR: real.strip3D.p2.ir,
+          widthIR: real.strip3D.width.ir,
+          colourIR: real.strip3D.colour.ir,
+        };
+        return {
+          v: "shape",
+          dim: 3,
+          // sprite と同じく、レイマーチの合成からは常に負ける定数(=描かない)。
+          // 実体は strip3d パス(カメラ向きビルボード、深度テストなし)が描く(ADR-0036)
+          dist: (c) => num(c.arena.node({ k: "const", v: 1e9, t: "f32" })),
+          colour: (c) => {
+            const zero = c.arena.node({ k: "const", v: 0, t: "f32" });
+            return vecV(4, c.arena.node({ k: "vec", parts: [zero, zero, zero, zero], t: "vec4" }));
+          },
+          strip3Batches: [batch],
+        };
+      }
+    }
+    // ここまで来た = instanced 描画(ADR-0014/0016/0036)に昇格せず、以下の O(n) SDF
     // ループにフォールバックする。見た目は変わらないが、n が大きいシーンでは
     // フレームレートに直結する「見えない性能崖」なので警告で可視化する
     // (この崖を実際に踏んで気づいた: liftDist/liftField 周りの副チャンネル
@@ -130,9 +158,9 @@ export function loopShape(ctx: Ctx, n: number, gen: (i: VNum) => VShape, span: S
       severity: "warning",
       message:
         `scatter ${n}個が instanced 描画に昇格せず、O(n) の SDF ループになりました。` +
-        `対象になるのは \`point r |> move v |> fill/glow\`(パーティクル、ADR-0014)か ` +
-        `\`line/bezier |> outline w |> fill c\`(ストリップ、ADR-0016)という連鎖だけで、` +
-        `move/fill/glow/outline 以外の合成子(warp/rot/scale/distort/<+> 等)を挟むと ` +
+        `対象になるのは \`point r |> move v |> fill/glow\`(パーティクル、ADR-0014)、` +
+        `\`line/bezier |> outline w |> fill c\`(2D/3Dストリップ、ADR-0016/0036)` +
+        `という連鎖だけで、move/fill/glow/outline 以外の合成子(warp/rot/scale/distort/<+> 等)を挟むと ` +
         `安全のため自動的にこの遅い経路へフォールバックします。n が大きいと ` +
         `フレームレートに直結するので、対象の連鎖に書き換えられないか確認してください`,
       span,
