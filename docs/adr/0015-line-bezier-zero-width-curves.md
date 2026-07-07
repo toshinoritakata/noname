@@ -1,7 +1,13 @@
 # ADR-0015: line / bezier は距離ゼロの曲線とし、太さは outline に委ねる
 
-- Status: accepted
+- Status: superseded by [[ADR-0037]]
 - Date: 2026-07-05
+
+**2026-07-07 追記**: line/bezier の SDF(本ADRの核)は [[ADR-0037]] で
+完全に廃止し、instanced描画(strip2D/strip3D、ADR-0016/0036)専用の
+プリミティブになった。「太さは outline に委ねる」という設計判断自体は
+ADR-0037にそのまま引き継いでいる(`strip2D`/`strip3D` の `width` を
+`outline` が更新する形で存続)。以下は当時の記録として残す
 
 ## Context
 

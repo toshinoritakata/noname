@@ -10,6 +10,7 @@ import type {
   Ctx,
   Dim,
   SimHandle,
+  StripBatchSpec,
   Value,
   VBool,
   VField,
@@ -174,6 +175,30 @@ export function toImage(ctx: Ctx, v: Value, span: Span): VField {
   if (v.v === "shape") {
     const sh = v;
     if (sh.dim === 3) fail("3D図形はそのまま画像にできません。`render カメラ 図形` を通してください", span);
+    if (sh.strip2D) {
+      // line/bezier 単体(scatterしていない)は dist を持たない(ADR-0037)ので、
+      // ここで dist に一切触れず、インスタンス数1のバッチとして直接登録する
+      // (scatter 集約後の stripBatches と同じ描画経路に乗せる)
+      const id = ctx.arena.freshLoopId();
+      const batch: StripBatchSpec = {
+        count: 1,
+        loopId: id,
+        p0IR: sh.strip2D.p0.ir,
+        p1IR: sh.strip2D.p1.ir,
+        p2IR: sh.strip2D.p2.ir,
+        widthIR: sh.strip2D.width.ir,
+        colourIR: sh.strip2D.colour.ir,
+      };
+      return {
+        v: "field",
+        dim: 2,
+        fn: (c) => {
+          const zero = c.arena.node({ k: "const", v: 0, t: "f32" });
+          return vecV(4, c.arena.node({ k: "vec", parts: [zero, zero, zero, zero], t: "vec4" }));
+        },
+        stripBatches: [batch],
+      };
+    }
     return {
       v: "field",
       dim: 2,

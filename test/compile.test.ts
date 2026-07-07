@@ -154,7 +154,10 @@ out (render (orbit 4 0) scene)`);
   assert.ok(r.program!.passes.some((p) => p.kind === "strip3d"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
 });
 
-test("scatter した3D lineに rot を挟むと strip3d に昇格せず警告が出る", () => {
+test("scatter した3D lineに rot を挟むと strip3d に昇格せず、SDFも無いのでコンパイルエラーになる(ADR-0037)", () => {
+  // rot が strip3D を落とす(move/fill/glow/outline 以外は安全フォールバック)ので
+  // ADR-0035 の警告も出るが、line/bezier には ADR-0037 でSDFが無いので、
+  // フォールバック先の O(n) ループ自体が dist を呼んでコンパイルエラーになる
   const r = compile(`scene = scatter 100 \\i ->
     line [hash i, hash (i+1), hash (i+2)] [hash (i+3), hash (i+4), hash (i+5)]
     |> outline 0.02
@@ -162,13 +165,33 @@ test("scatter した3D lineに rot を挟むと strip3d に昇格せず警告が
     |> fill white
 
 out (render (orbit 4 0) scene)`);
+  assert.ok(r.diagnostics.some((d) => d.severity === "error" && /line にはSDFがありません/.test(d.message)), JSON.stringify(r.diagnostics));
+  assert.equal(r.program, null);
+});
+
+test("line/bezier 単体を move/cut/inter/<+>/if/morph と組み合わせるとコンパイルエラーになる(ADR-0037)", () => {
+  const cases = [
+    `out (line [0, 0] [0.3, 0.3] |> outline 0.02 |> move [0.1, 0] |> fill white)`,
+    `out (cut (box 0.3) (line [0, 0] [0.3, 0.3] |> outline 0.02 |> fill white))`,
+    `out (inter (box 0.3) (line [0, 0] [0.3, 0.3] |> outline 0.02 |> fill white))`,
+    `out ((line [0, 0] [0.3, 0.3] |> outline 0.02 |> fill white) <+> circle 0.3)`,
+    `out (if (hash 1 |> \\x -> x > 0.5) then (line [0, 0] [0.3, 0.3] |> outline 0.02 |> fill white) else circle 0.3)`,
+  ];
+  for (const src of cases) {
+    const r = compile(src);
+    assert.ok(
+      r.diagnostics.some((d) => d.severity === "error" && /にはSDFがありません/.test(d.message)),
+      `${src}\n${JSON.stringify(r.diagnostics)}`,
+    );
+    assert.equal(r.program, null, src);
+  }
+});
+
+test("line/bezier 単体は outline/fill/glow だけなら dist に触れずコンパイルできる(ADR-0037)", () => {
+  const r = compile(`out (bezier [0, 0] [0.2, 0.5] [0.4, 0] |> outline 0.03 |> fill white)`);
   assert.equal(r.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(r.diagnostics));
   assert.ok(r.program);
-  assert.ok(
-    r.diagnostics.some((d) => d.severity === "warning" && /instanced 描画に昇格せず/.test(d.message)),
-    JSON.stringify(r.diagnostics),
-  );
-  assert.ok(!r.program!.passes.some((p) => p.kind === "strip3d"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
+  assert.ok(r.program!.passes.some((p) => p.kind === "strip"), JSON.stringify(r.program!.passes.map((p) => p.kind)));
 });
 
 test("glitch は image パスにコンパイルされる", () => {

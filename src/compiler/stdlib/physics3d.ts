@@ -4,7 +4,7 @@ import type { Span } from "../diag.ts";
 import type { NodeId } from "../ir.ts";
 import { vecType } from "../ir.ts";
 import { asNum, asVec, call, constF, constVec, describe, fail, toShape, vecV, worldToUv } from "../ops.ts";
-import type { Ctx, Value, VField, VVec } from "../value.ts";
+import type { Ctx, Strip3BatchSpec, Value, VField, VVec } from "../value.ts";
 import { bi, binIR } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 
@@ -91,8 +91,32 @@ export function installPhysics3D(add: AddFn, addV: AddVFn): void {
       if (sh.dim === 2) fail("render は3D図形用です(2D図形はそのまま out に渡せます)", span);
       const coord3 = ctx.arena.node({ k: "coord", t: "vec3" });
       const p3 = vecV(3, coord3);
-      const distRoot = sh.dist(ctx, p3, span).ir;
-      const colourRoot = sh.colour(ctx, p3, span).ir;
+      let distRoot: NodeId;
+      let colourRoot: NodeId;
+      let strip3Batches = sh.strip3Batches;
+      if (sh.strip3D) {
+        // 単体(scatterしていない)3D line/bezier は dist を持たない(ADR-0037)ので、
+        // dist に一切触れず、レイマーチの合成では常に負ける定数(=不可視)にし、
+        // インスタンス数1のバッチとして直接登録する(scatter 集約後の strip3Batches
+        // と同じ描画経路に乗せる)
+        const zero = ctx.arena.node({ k: "const", v: 0, t: "f32" });
+        distRoot = ctx.arena.node({ k: "const", v: 1e9, t: "f32" });
+        colourRoot = ctx.arena.node({ k: "vec", parts: [zero, zero, zero, zero], t: "vec4" });
+        const loopId = ctx.arena.freshLoopId();
+        const batch: Strip3BatchSpec = {
+          count: 1,
+          loopId,
+          p0IR: sh.strip3D.p0.ir,
+          p1IR: sh.strip3D.p1.ir,
+          p2IR: sh.strip3D.p2.ir,
+          widthIR: sh.strip3D.width.ir,
+          colourIR: sh.strip3D.colour.ir,
+        };
+        strip3Batches = [...(strip3Batches ?? []), batch];
+      } else {
+        distRoot = sh.dist(ctx, p3, span).ir;
+        colourRoot = sh.colour(ctx, p3, span).ir;
+      }
       const id = ctx.raymarches.length;
       ctx.raymarches.push({
         kind: "raymarch",
@@ -104,7 +128,7 @@ export function installPhysics3D(add: AddFn, addV: AddVFn): void {
         fov: camV.fov.ir,
         span,
         spriteBatches: sh.spriteBatches,
-        strip3Batches: sh.strip3Batches,
+        strip3Batches,
       });
       return {
         v: "field",

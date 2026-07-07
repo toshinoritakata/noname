@@ -92,49 +92,5 @@ checkBoundary("move (circle 0.3)", "circle 0.3 |> move [0.5, 0.5]", 2, [
   [0.5, 0.2],
 ]);
 
-// ---- line / bezier(距離ゼロの曲線。太さは outline で与える) ----
-checkBoundary("line 2D", "line [-0.5, -0.2] [0.5, 0.3]", 2, [
-  [-0.5, -0.2],
-  [0.5, 0.3],
-  [0, 0.05],
-]);
-checkLipschitz("line 2D", "line [-0.5, -0.2] [0.5, 0.3]", 2);
-checkLipschitz("line 2D + outline", "line [-0.5, -0.2] [0.5, 0.3] |> outline 0.05", 2);
-
-checkBoundary("line 3D", "line [-0.4, 0.1, -0.3] [0.4, -0.1, 0.2]", 3, [
-  [-0.4, 0.1, -0.3],
-  [0.4, -0.1, 0.2],
-]);
-checkLipschitz("line 3D", "line [-0.4, 0.1, -0.3] [0.4, -0.1, 0.2]", 3);
-
-test("bezier 2D: 曲線上の点で境界 ≈ 0(乱択サンプル)", () => {
-  const src = "bezier [-0.6, -0.3] [0.1, 0.7] [0.6, -0.2]";
-  const d = distFn(src, 2);
-  const A = [-0.6, -0.3],
-    B = [0.1, 0.7],
-    C = [0.6, -0.2];
-  const bezierPoint = (t: number): number[] => {
-    const u = 1 - t;
-    return [u * u * A[0] + 2 * u * t * B[0] + t * t * C[0], u * u * A[1] + 2 * u * t * B[1] + t * t * C[1]];
-  };
-  for (let t = 0; t <= 1; t += 0.1) {
-    const p = bezierPoint(t);
-    assert.ok(Math.abs(d(p)) < 1e-3, `t=${t.toFixed(1)} で dist=${d(p)}`);
-  }
-});
-checkLipschitz("bezier 2D", "bezier [-0.6, -0.3] [0.1, 0.7] [0.6, -0.2]", 2);
-checkLipschitz("bezier 2D + outline", "bezier [-0.6, -0.3] [0.1, 0.7] [0.6, -0.2] |> outline 0.04", 2);
-
-test("bezier 3D: 曲線上の点で境界 ≈ 0(乱択サンプル、平面投影の正しさを検査)", () => {
-  const src = "bezier [-0.4, 0.1, -0.3] [0, 0.5, 0.4] [0.4, -0.1, 0.2]";
-  const d = distFn(src, 3);
-  const A = [-0.4, 0.1, -0.3],
-    B = [0, 0.5, 0.4],
-    C = [0.4, -0.1, 0.2];
-  for (let t = 0; t <= 1; t += 0.1) {
-    const u = 1 - t;
-    const p = [0, 1, 2].map((i) => u * u * A[i] + 2 * u * t * B[i] + t * t * C[i]);
-    assert.ok(Math.abs(d(p)) < 1e-3, `t=${t.toFixed(1)} で dist=${d(p)}`);
-  }
-});
-checkLipschitz("bezier 3D", "bezier [-0.4, 0.1, -0.3] [0, 0.5, 0.4] [0.4, -0.1, 0.2]", 3);
+// line/bezier には SDF が無い(ADR-0037で廃止、instanced strip 描画専用)。
+// SDF性質テストは対象外。コンパイル可否・instanced昇格の検証は test/compile.test.ts 側

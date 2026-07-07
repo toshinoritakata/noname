@@ -212,7 +212,6 @@ function callFn(fn: string, args: Num[]): Num {
   const a = args[0];
   const b = args[1];
   const c = args[2];
-  const d4 = args[3];
   switch (fn) {
     case "sin":
       return mapN(a, Math.sin);
@@ -352,47 +351,6 @@ function callFn(fn: string, args: Num[]): Num {
       px -= clampN(px, -2 * r, 0);
       return -len([px, py]) * Math.sign(py || 1);
     }
-    case "sdSegment2":
-    case "sdSegment3": {
-      const p = asArrN(a);
-      const segA = asArrN(b);
-      const segB = asArrN(c);
-      return sdSegment3JS(p, segA, segB);
-    }
-    case "sdBezier2": {
-      const pos = asArrN(a);
-      const A = asArrN(b);
-      const B = asArrN(c);
-      const C = asArrN(d4);
-      return sdBezier2(pos, A, B, C);
-    }
-    case "sdBezier3": {
-      const pos = asArrN(a);
-      const A = asArrN(b);
-      const B = asArrN(c);
-      const C = asArrN(d4);
-      let n = cross3(sub3(B, A), sub3(C, A));
-      const nlen = len(n);
-      if (nlen < 1e-6) return sdSegment3JS(pos, A, C);
-      n = n.map((x) => x / nlen);
-      let u = sub3(B, A);
-      const dun = dot3(u, n);
-      u = u.map((x, i) => x - n[i] * dun);
-      const ulen = len(u);
-      if (ulen < 1e-6) return sdSegment3JS(pos, A, C);
-      u = u.map((x) => x / ulen);
-      const v = cross3(n, u);
-      const relB = sub3(B, A);
-      const relC = sub3(C, A);
-      const a2 = [0, 0];
-      const b2 = [dot3(relB, u), dot3(relB, v)];
-      const c2 = [dot3(relC, u), dot3(relC, v)];
-      const rel = sub3(pos, A);
-      const p2 = [dot3(rel, u), dot3(rel, v)];
-      const perp = dot3(rel, n);
-      const d2 = sdBezier2(p2, a2, b2, c2);
-      return Math.hypot(d2, perp);
-    }
     case "smin": {
       const x = asNum2(a);
       const y = asNum2(b);
@@ -440,64 +398,3 @@ function asNum2(v: Num): number {
   return Array.isArray(v) ? v[0] : v;
 }
 
-// ---- line / bezier ヘルパ(wgsl.ts の LIB と同一アルゴリズム) --------------------
-
-function sub3(a: number[], b: number[]): number[] {
-  return a.map((x, i) => x - b[i]);
-}
-function dot3(a: number[], b: number[]): number {
-  return a.reduce((s, x, i) => s + x * b[i], 0);
-}
-function cross3(a: number[], b: number[]): number[] {
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-}
-function sdSegment3JS(p: number[], a: number[], b: number[]): number {
-  const pa = sub3(p, a);
-  const ba = sub3(b, a);
-  const h = clampN(dot3(pa, ba) / Math.max(dot3(ba, ba), 1e-9), 0, 1);
-  return len(pa.map((x, i) => x - ba[i] * h));
-}
-
-/** 2次ベジエの厳密距離(iq の解析解)。wgsl.ts の sdBezier2 と同一アルゴリズム */
-function sdBezier2(pos: number[], A: number[], B: number[], C: number[]): number {
-  const sub2 = (x: number[], y: number[]): number[] => [x[0] - y[0], x[1] - y[1]];
-  const add2 = (x: number[], y: number[]): number[] => [x[0] + y[0], x[1] + y[1]];
-  const mul2 = (x: number[], s: number): number[] => [x[0] * s, x[1] * s];
-  const dot2v = (x: number[], y: number[]): number => x[0] * y[0] + x[1] * y[1];
-  const sign = (x: number): number => (x < 0 ? -1 : x > 0 ? 1 : 0);
-  const cbrt = (x: number): number => sign(x) * Math.pow(Math.abs(x), 1 / 3);
-
-  const a = sub2(B, A);
-  const b = add2(sub2(A, mul2(B, 2)), C);
-  const c = mul2(a, 2);
-  const d = sub2(A, pos);
-  const kk = 1.0 / Math.max(dot2v(b, b), 1e-9);
-  const kx = kk * dot2v(a, b);
-  const ky = (kk * (2.0 * dot2v(a, a) + dot2v(d, b))) / 3.0;
-  const kz = kk * dot2v(d, a);
-  let res: number;
-  const p = ky - kx * kx;
-  const p3 = p * p * p;
-  const q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
-  let h = q * q + 4.0 * p3;
-  if (h >= 0) {
-    h = Math.sqrt(h);
-    const x = [(h - q) / 2, (-h - q) / 2];
-    const uv = [sign(x[0]) * cbrt(Math.abs(x[0])), sign(x[1]) * cbrt(Math.abs(x[1]))];
-    const t = clampN(uv[0] + uv[1] - kx, 0, 1);
-    const qq = add2(d, mul2(add2(c, mul2(b, t)), t));
-    res = dot2v(qq, qq);
-  } else {
-    const z = Math.sqrt(-p);
-    const v = Math.acos(clampN(q / (p * z * 2.0), -1, 1)) / 3.0;
-    const m = Math.cos(v);
-    const n = Math.sin(v) * 1.732050808;
-    const ts = [clampN((m + m) * z - kx, 0, 1), clampN((-n - m) * z - kx, 0, 1), clampN((n - m) * z - kx, 0, 1)];
-    const ds = ts.map((t) => {
-      const qq = add2(d, mul2(add2(c, mul2(b, t)), t));
-      return dot2v(qq, qq);
-    });
-    res = Math.min(...ds);
-  }
-  return Math.sqrt(res);
-}

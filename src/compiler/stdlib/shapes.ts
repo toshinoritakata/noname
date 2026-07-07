@@ -7,6 +7,23 @@ import { bi, binIR, defaultColour, rec, shape, warpValue } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 import { BLEND_UNROLL_LIMIT, blendAllLoop } from "./iteration.ts";
 
+/**
+ * line/bezier には SDF が無い(ADR-0037で完全に廃止)。`outline`/`fill`/`glow`
+ * (3Dのみ)/`scatter` 以外の合成子(move/rot/scale/warp/distort/cut/inter/
+ * <+>/if/morph 等)は内部で dist を評価しようとするため、ここで明確な
+ * コンパイルエラーにする。単体使用(scatterしない場合)は toImage/render が
+ * strip2D/strip3D を見つけた時点で dist を一切呼ばずに描画するので、
+ * この関数が実際に呼ばれるのは「対象外の合成をした時」だけになる
+ */
+function noStripDist(kind: "line" | "bezier"): VShape["dist"] {
+  return (_c, _p, s) =>
+    fail(
+      `${kind} にはSDFがありません(ADR-0037)。outline/fill/glow(3Dのみ)/scatter 以外の合成` +
+        `(move/rot/scale/warp/distort/cut/inter/<+>/if/morph 等)はできません`,
+      s,
+    );
+}
+
 function planeAxis(axis: 0 | 1 | 2) {
   const sel = ["x", "y", "z"][axis];
   return bi(`plane.${sel}`, 1, (ctx, [hV], span) => {
@@ -74,9 +91,7 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
       const b = asVec(ctx, bV, span);
       if (a.n !== b.n) fail(`line の2点の次元が合いません: ${a.n} と ${b.n}`, span);
       const dim = (a.n === 3 ? 3 : 2) as Dim;
-      const fn = a.n === 3 ? "sdSegment3" : "sdSegment2";
-      // 距離ゼロの曲線(パス上でちょうど0)。太さは |> outline w で与える
-      const sh = shape(dim, (c, p) => num(call(c, fn, [p.ir, a.ir, b.ir], "f32")));
+      const sh = shape(dim, noStripDist("line"));
       if (a.n === 2) {
         // ストリップ描画マーカー(ADR-0016)。line は制御点=中点の退化ベジエとして扱う
         const mid = vecV(2, binIR(ctx, "*", binIR(ctx, "+", a.ir, b.ir, "vec2"), constF(ctx, 0.5).ir, "vec2"));
@@ -99,9 +114,7 @@ export function installShapes(add: AddFn, addV: AddVFn): void {
         fail(`bezier の3点の次元が合いません: ${a.n} / ${b.n} / ${cc.n}`, span);
       }
       const dim = (a.n === 3 ? 3 : 2) as Dim;
-      const fn = a.n === 3 ? "sdBezier3" : "sdBezier2";
-      // line と同じく距離ゼロの曲線。太さは |> outline w で与える
-      const sh = shape(dim, (c, p) => num(call(c, fn, [p.ir, a.ir, b.ir, cc.ir], "f32")));
+      const sh = shape(dim, noStripDist("bezier"));
       if (a.n === 2) {
         sh.strip2D = { p0: a, p1: b, p2: cc, width: constF(ctx, 0), colour: defaultColour(ctx) };
       } else {

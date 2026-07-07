@@ -31,7 +31,7 @@
 - [0012](0012-two-input-normal-forms-inputadapter.md) — 入力は2正規形、拡張点は InputAdapter のみ(TUIO 等)
 - [0013](0013-rejected-features.md) — 採らないと決めたもの(組合せ展開・パターン代数・bbox ほか)
 - [0014](0014-particle-instanced-sprites.md) — scatter の点状パーティクルはインスタンス化スプライトで描画(CSG ループの構造的パフォーマンス問題への対応)
-- [0015](0015-line-bezier-zero-width-curves.md) — line/bezier は距離ゼロの曲線とし、太さは outline に委ねる
+- [0015](0015-line-bezier-zero-width-curves.md) — (撤回・[0037](0037-line-bezier-sdf-fully-removed.md)に差し替え) line/bezier は距離ゼロの曲線とし、太さは outline に委ねる
 - [0016](0016-line-bezier-strip-polygon-2d.md) — 2D の line/bezier は SDF ではなく三角形ストリップでラスタライズする(3D は未対応、需要が見えたら再訪)
 - [0017](0017-blendall-large-n-loop.md) — blendAll は大きな N で WGSL ループに畳み込む(range/map/blendAll のパフォーマンス崖に対応、ループ巻き上げ機構の既存バグも修正)
 - [0018](0018-bloom-alpha-premultiply-fix.md) — bloom は glow のあるところでアルファも持ち上げる(image パスの自己アルファ事前乗算で glow が背景に一切滲まなかったバグの修正)
@@ -53,6 +53,7 @@
 - [0034](0034-glitch-postfx-band-burst.md) — `glitch` は走査線帯×離散時間ステップのバースト発火として実装する(単純な全画面ノイズではなく疎で離散的な発火にする)
 - [0035](0035-scatter-instancing-fallback-warning.md) — `scatter` が instanced 描画に昇格し損ねたら warning 診断を出す(見た目を変えずにO(n)ループへ無警告で転落していた「見えない性能崖」の可視化)
 - [0036](0036-3d-line-bezier-strip-instancing.md) — 3D の line/bezier を sprite と同じ深度テストなしビルボード(カメラ向きリボン)で instanced 描画する(2D限定だったADR-0016を3Dに拡張)
+- [0037](0037-line-bezier-sdf-fully-removed.md) — line/bezier のSDFを完全に廃止し、instanced描画(strip2D/strip3D)専用にする(ADR-0015を撤回。単体使用も含めて move/cut/inter/<+>/if/morph 等との合成はコンパイルエラーになる)
 
 ## 未決(ADR 化待ち)
 
