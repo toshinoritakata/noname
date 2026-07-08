@@ -19,6 +19,7 @@ import {
   worldToUv,
 } from "../ops.ts";
 import type { Ctx, SimHandle, StateChannel, Value, VField, VVec } from "../value.ts";
+import { texKeyPrev, texKeySim } from "../tex-keys.ts";
 import { bi, binIR } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 
@@ -179,7 +180,7 @@ function makeSimulate(ctx: Ctx, count: number | null, init: Value, update: Value
     totalFloats: total,
     texCount,
     sig,
-    texKey: (i: number) => `sim:${name}:${i}`,
+    texKey: (i: number) => texKeySim(name, i),
   };
 
   const initRoots = packRoots(ctx, initVal, channels, texCount, span);
@@ -247,7 +248,7 @@ export function installSimulate(add: AddFn, addV: AddVFn): void {
     return {
       v: "field",
       dim: 2,
-      fn: (c, p) => vecV(4, c.arena.node({ k: "sample", tex: "prev", p: worldToUv(c, p.ir), t: "vec4" })),
+      fn: (c, p) => vecV(4, c.arena.node({ k: "sample", tex: texKeyPrev, p: worldToUv(c, p.ir), t: "vec4" })),
     } as VField;
   });
   addV(

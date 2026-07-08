@@ -3,6 +3,7 @@
 // (BufferRegistry の所有)。数値リテラルのみの変更は updateLiterals の高速経路で反映。
 
 import type { Diagnostic } from "../compiler/diag.ts";
+import { parseTexKey } from "../compiler/tex-keys.ts";
 import type { CompiledPass, CompiledProgram } from "../compiler/wgsl.ts";
 import { createWorkTexture, WORK_FORMAT } from "./gpu.ts";
 import type { BufferRegistry } from "./registry.ts";
@@ -411,33 +412,33 @@ export class ProgramSlot {
    */
   execute(encoder: GPUCommandEncoder, registry: BufferRegistry, resolveExtra: TexResolver, stepSims: boolean): void {
     const resolve: TexResolver = (key) => {
-      if (key === "prev") {
-        const t = registry.getPrevRead();
-        return t ? cachedView(t) : null;
+      const parsed = parseTexKey(key);
+      switch (parsed.kind) {
+        case "prev": {
+          const t = registry.getPrevRead();
+          return t ? cachedView(t) : null;
+        }
+        case "sim": {
+          const entry = registry.getSim(parsed.name);
+          return entry ? cachedView(entry.read[parsed.index]) : null;
+        }
+        case "rm": {
+          const t = this.rmTex.get(parsed.id);
+          return t ? cachedView(t) : null;
+        }
+        case "bloom": {
+          const t = this.bloomTex.get(key);
+          return t ? cachedView(t) : null;
+        }
+        case "scene":
+          return this.sceneTex ? cachedView(this.sceneTex) : null;
+        case "data": {
+          const t = this.dataTex.get(parsed.dataKey)?.[parsed.index];
+          return t ? cachedView(t) : null;
+        }
+        case "other":
+          return resolveExtra(key);
       }
-      const sim = key.match(/^sim:(.+):(\d+)$/);
-      if (sim) {
-        const entry = registry.getSim(sim[1]);
-        return entry ? cachedView(entry.read[Number(sim[2])]) : null;
-      }
-      const rm = key.match(/^rm:(\d+)$/);
-      if (rm) {
-        const t = this.rmTex.get(Number(rm[1]));
-        return t ? cachedView(t) : null;
-      }
-      if (key.startsWith("bloom:")) {
-        const t = this.bloomTex.get(key);
-        return t ? cachedView(t) : null;
-      }
-      if (key === "scene") {
-        return this.sceneTex ? cachedView(this.sceneTex) : null;
-      }
-      const data = key.match(/^((?:data|sprite|strip3?):\d+):(\d+)$/);
-      if (data) {
-        const t = this.dataTex.get(data[1])?.[Number(data[2])];
-        return t ? cachedView(t) : null;
-      }
-      return resolveExtra(key);
     };
 
     // ---- data(ループ不変式の巻き上げ先。毎フレーム再計算 — time 依存があり得るため) ----

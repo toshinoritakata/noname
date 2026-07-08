@@ -6,6 +6,7 @@
 
 import { CompileError, type Span } from "./diag.ts";
 import { vecType, type NodeId } from "./ir.ts";
+import { texKeyScene } from "./tex-keys.ts";
 import type {
   Ctx,
   Dim,
@@ -178,7 +179,7 @@ export function toField(ctx: Ctx, v: Value, span: Span): VField {
  * なり、glow+bloom が2D line/bezier にも効く(ADR-0044、ADR-0016 を差し替え)
  */
 function overSceneStrips(c: Ctx, p: VVec, base: NodeId): VVec {
-  const scene = c.arena.node({ k: "sample", tex: "scene", p: worldToUv(c, p.ir), t: "vec4" });
+  const scene = c.arena.node({ k: "sample", tex: texKeyScene, p: worldToUv(c, p.ir), t: "vec4" });
   return vecV(4, call(c, "overPremul", [scene, base], "vec4"));
 }
 

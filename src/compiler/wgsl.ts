@@ -21,6 +21,7 @@ import {
 import type { StagedProgram } from "./stage.ts";
 import type { BloomPassSpec, RaymarchPassSpec, SimPassSpec, StripBatchSpec } from "./value.ts";
 import { LIB } from "./wgsl-lib.ts";
+import { bloomKeys, texKeyData, texKeyDataOut, texKeySprite, texKeyStrip, texKeyStrip3 } from "./tex-keys.ts";
 
 export interface CompiledPass {
   kind:
@@ -532,7 +533,7 @@ function hoistLoopBody(
   for (const c of chosen) {
     const t = Math.floor(c.offset / 4);
     const inner = c.offset % 4;
-    const f = arena.node({ k: "fetch", tex: `data:${loopId}:${t}`, i: loopiNode, t: "vec4" });
+    const f = arena.node({ k: "fetch", tex: texKeyDataOut(texKeyData(loopId), t), i: loopiNode, t: "vec4" });
     const sel = "xyzw".slice(inner, inner + c.len);
     repl.set(
       c.id,
@@ -712,7 +713,7 @@ ${scope.lines.join("\n")}
       code,
       targets: dp.texCount,
       textures: cg.usedTex,
-      dataKey: `data:${dp.loopId}`,
+      dataKey: texKeyData(dp.loopId),
       dataCount: dp.count,
       hash: fnv1a("data:" + arena.structuralHash(dp.roots) + ":" + inputs.join(",")),
       lineSpans: [],
@@ -801,7 +802,7 @@ ${camScope.lines.join("\n")}
     // 「N インスタンスのビルボード描画」で粒子を出す。dist は既に定数 +∞ に
     // すり替え済みなので、レイマーチの合成には一切参加しない
     for (const batch of rm.spriteBatches ?? []) {
-      const dataKey = `sprite:${batch.loopId}`;
+      const dataKey = texKeySprite(batch.loopId);
       {
         const cg2 = new Codegen(arena, layout, inputIndex);
         const scope = newScope();
@@ -838,8 +839,8 @@ ${scope.lines.join("\n")}
       }
       {
         const cg3 = new Codegen(arena, layout, inputIndex);
-        const posTex = cg3.texture(`${dataKey}:0`);
-        const colTex = cg3.texture(`${dataKey}:1`);
+        const posTex = cg3.texture(texKeyDataOut(dataKey, 0));
+        const colTex = cg3.texture(texKeyDataOut(dataKey, 1));
         const camScope3 = newScope();
         const eye3 = cg3.emit(rm.eye, camScope3);
         const target3 = cg3.emit(rm.target, camScope3);
@@ -912,7 +913,7 @@ fn fs_main(in: SpriteVOut) -> @location(0) vec4f {
     // 重ね描き。カメラ向きのリボン(進行方向と視線方向の外積で幅方向を決める)を
     // 1ベジエ STRIP3D_SEGMENTS 個の直線に分割して近似する(2D strip と同じ手法)
     for (const batch of rm.strip3Batches ?? []) {
-      const dataKey = `strip3:${batch.loopId}`;
+      const dataKey = texKeyStrip3(batch.loopId);
       {
         // データパス: tex0=vec4(p0,width), tex1=vec4(p1,0), tex2=vec4(p2,0), tex3=colour
         const cg2 = new Codegen(arena, layout, inputIndex);
@@ -962,10 +963,10 @@ ${scope.lines.join("\n")}
       }
       {
         const cg3 = new Codegen(arena, layout, inputIndex);
-        const tex0 = cg3.texture(`${dataKey}:0`);
-        const tex1 = cg3.texture(`${dataKey}:1`);
-        const tex2 = cg3.texture(`${dataKey}:2`);
-        const tex3 = cg3.texture(`${dataKey}:3`);
+        const tex0 = cg3.texture(texKeyDataOut(dataKey, 0));
+        const tex1 = cg3.texture(texKeyDataOut(dataKey, 1));
+        const tex2 = cg3.texture(texKeyDataOut(dataKey, 2));
+        const tex3 = cg3.texture(texKeyDataOut(dataKey, 3));
         const camScope4 = newScope();
         const eye4 = cg3.emit(rm.eye, camScope4);
         const target4 = cg3.emit(rm.target, camScope4);
@@ -1076,10 +1077,10 @@ function emitBloomPasses(ectx: EmitCtx, blooms: BloomPassSpec[]): CompiledPass[]
   const passes: CompiledPass[] = [];
   for (const b of blooms) {
     const BLOOM_LEVELS = b.levels;
-    const nativeKey = `bloom:${b.id}:n`;
-    const eKey = `bloom:${b.id}:e`;
-    const downKey = (i: number) => `bloom:${b.id}:d${i}`;
-    const upKey = (i: number) => (i === 0 ? `bloom:${b.id}:u0` : `bloom:${b.id}:u${i}`);
+    const nativeKey = bloomKeys.native(b.id);
+    const eKey = bloomKeys.extract(b.id);
+    const downKey = (i: number) => bloomKeys.down(b.id, i);
+    const upKey = (i: number) => bloomKeys.up(b.id, i);
 
     // native: フル解像度、ユーザーの式(brightPass 済み)を評価。
     // 以前はここを直接「半解像度」で評価していたが、シーン側のアンチエイリアス
@@ -1245,7 +1246,7 @@ function emitStripPasses(ectx: EmitCtx, stripBatches: StripBatchSpec[]): Compile
   const passes: CompiledPass[] = [];
   const STRIP_SEGMENTS = 16;
   for (const batch of stripBatches) {
-    const dataKey = `strip:${batch.loopId}`;
+    const dataKey = texKeyStrip(batch.loopId);
     {
       // データパス: tex0=vec4(p0,p2), tex1=vec4(p1,width), tex2=colour
       const cg2 = new Codegen(arena, layout, inputIndex);
@@ -1290,9 +1291,9 @@ ${scope.lines.join("\n")}
     {
       const cg3 = new Codegen(arena, layout, inputIndex);
       cg3.lib("worldToClip");
-      const tex0 = cg3.texture(`${dataKey}:0`);
-      const tex1 = cg3.texture(`${dataKey}:1`);
-      const tex2 = cg3.texture(`${dataKey}:2`);
+      const tex0 = cg3.texture(texKeyDataOut(dataKey, 0));
+      const tex1 = cg3.texture(texKeyDataOut(dataKey, 1));
+      const tex2 = cg3.texture(texKeyDataOut(dataKey, 2));
       const segs = STRIP_SEGMENTS;
       const vs = `struct StripVOut {
   @builtin(position) pos: vec4f,

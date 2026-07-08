@@ -5,6 +5,7 @@ import type { NodeId } from "../ir.ts";
 import { vecType } from "../ir.ts";
 import { asNum, asVec, call, constF, constVec, describe, fail, toShape, vecV, worldToUv } from "../ops.ts";
 import type { Ctx, Strip3BatchSpec, Value, VField, VVec } from "../value.ts";
+import { texKeyRm } from "../tex-keys.ts";
 import { bi, binIR } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
 
@@ -133,7 +134,7 @@ export function installPhysics3D(add: AddFn, addV: AddVFn): void {
       return {
         v: "field",
         dim: 2,
-        fn: (c, p) => vecV(4, c.arena.node({ k: "sample", tex: `rm:${id}`, p: worldToUv(c, p.ir), t: "vec4" })),
+        fn: (c, p) => vecV(4, c.arena.node({ k: "sample", tex: texKeyRm(id), p: worldToUv(c, p.ir), t: "vec4" })),
       } as VField;
     }),
   );
