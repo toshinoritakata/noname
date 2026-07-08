@@ -450,6 +450,16 @@ const LIB: Record<string, { deps?: string[]; src: string }> = {
   },
 };
 
+/**
+ * "call" IR ノードの fn 名を WGSL 側が解決できるか(WGSL 組み込み or LIB エントリ)。
+ * stdlib が call() で渡す名前は必ずこれを満たさなければならない — 満たさないと
+ * generateWGSL 内で `LIB[n].src` が undefined になり、わかりにくいクラッシュになる
+ * (候補1: builtin 名前空間の適合テストが使う唯一の窓口)
+ */
+export function wgslCanResolveCall(fn: string): boolean {
+  return WGSL_BUILTIN.has(fn) || fn in LIB;
+}
+
 /** WGSL 組み込みとしてそのまま出せる関数名 */
 const WGSL_BUILTIN = new Set([
   "sin",
