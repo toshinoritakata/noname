@@ -5,8 +5,9 @@
 import type { Diagnostic } from "../compiler/diag.ts";
 import type { Gpu } from "./gpu.ts";
 import { WORK_FORMAT } from "./gpu.ts";
+import { cachedView, PipelineCache, TextTextureCache, viewId } from "./caches.ts";
 import { Clock, InputEngine } from "./inputs.ts";
-import { cachedView, PipelineCache, ProgramSlot, TextTextureCache, viewId } from "./program.ts";
+import { ProgramSlot } from "./program.ts";
 import { BufferRegistry } from "./registry.ts";
 import { CompilerClient } from "./compiler-client.ts";
 
