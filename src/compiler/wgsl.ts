@@ -19,6 +19,8 @@ import {
   type NodeId,
 } from "./ir.ts";
 import type { StagedProgram } from "./stage.ts";
+import type { BloomPassSpec, RaymarchPassSpec, SimPassSpec, StripBatchSpec } from "./value.ts";
+import { LIB } from "./wgsl-lib.ts";
 
 export interface CompiledPass {
   kind:
@@ -96,359 +98,6 @@ export interface CompiledProgram {
   textTextures: { key: string; text: string }[];
   programHash: string;
 }
-
-// ---- WGSL ライブラリ(使われた関数だけ含める) ------------------------------------
-
-const LIB: Record<string, { deps?: string[]; src: string }> = {
-  fmod: { src: `fn fmod(a: f32, b: f32) -> f32 { return a - b * floor(a / b); }` },
-  fmodv2: { src: `fn fmodv2(a: vec2f, b: vec2f) -> vec2f { return a - b * floor(a / b); }` },
-  fmodv3: { src: `fn fmodv3(a: vec3f, b: vec3f) -> vec3f { return a - b * floor(a / b); }` },
-  // 整数ビット列に対する MurmurHash3 の fmix32(既知の高品質アバランシュ関数)。
-  // 入力を10進小数の演算(*0.1031 等)に通す旧実装は f32 の有効桁(約7桁)を
-  // 超える大きさの入力(scatter の N が数万規模、time が長時間経過後など)で
-  // 小数部の情報が失われ、ユニークな出力数が数千〜1万強で頭打ちになる欠陥が
-  // あった(実測: N=100,000 でユニーク数12,025止まり)。IEEE754 のビット列を
-  // そのまま bitcast して混ぜる本実装は、入力の大きさに関係なく異なる浮動小数点
-  // 値なら異なるビット列を持つことを利用するため、この頭打ちが起きない
-  hashMix: {
-    src: `fn hashMix(seed: u32) -> u32 {
-  var v = seed;
-  v = v ^ (v >> 16u);
-  v = v * 0x7feb352du;
-  v = v ^ (v >> 15u);
-  v = v * 0x846ca68bu;
-  v = v ^ (v >> 16u);
-  return v;
-}`,
-  },
-  hash11: {
-    deps: ["hashMix"],
-    src: `fn hash11(n: f32) -> f32 {
-  return f32(hashMix(bitcast<u32>(n))) * (1.0 / 4294967296.0);
-}`,
-  },
-  hash21: {
-    deps: ["hashMix"],
-    src: `fn hash21(n: f32) -> vec2f {
-  let h0 = hashMix(bitcast<u32>(n));
-  let h1 = hashMix(h0 ^ 0x68bc21ebu);
-  return vec2f(f32(h0), f32(h1)) * (1.0 / 4294967296.0);
-}`,
-  },
-  hash22: {
-    deps: ["hashMix"],
-    src: `fn hash22(p: vec2f) -> vec2f {
-  let hx = hashMix(bitcast<u32>(p.x));
-  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
-  let h0 = hashMix(hx ^ hy);
-  let h1 = hashMix(h0 ^ 0x68bc21ebu);
-  return vec2f(f32(h0), f32(h1)) * (1.0 / 4294967296.0);
-}`,
-  },
-  hash12: {
-    deps: ["hashMix"],
-    src: `fn hash12(p: vec2f) -> f32 {
-  let hx = hashMix(bitcast<u32>(p.x));
-  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
-  return f32(hashMix(hx ^ hy)) * (1.0 / 4294967296.0);
-}`,
-  },
-  hash13: {
-    deps: ["hashMix"],
-    src: `fn hash13(p: vec3f) -> f32 {
-  let hx = hashMix(bitcast<u32>(p.x));
-  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
-  let hz = hashMix(bitcast<u32>(p.z) ^ 0x85ebca6bu);
-  return f32(hashMix(hx ^ hy ^ hz)) * (1.0 / 4294967296.0);
-}`,
-  },
-  hash33: {
-    deps: ["hashMix"],
-    src: `fn hash33(p: vec3f) -> vec3f {
-  let hx = hashMix(bitcast<u32>(p.x));
-  let hy = hashMix(bitcast<u32>(p.y) ^ 0x9e3779b9u);
-  let hz = hashMix(bitcast<u32>(p.z) ^ 0x85ebca6bu);
-  let h0 = hashMix(hx ^ hy ^ hz);
-  let h1 = hashMix(h0 ^ 0x68bc21ebu);
-  let h2 = hashMix(h1 ^ 0xb5297a4du);
-  return vec3f(f32(h0), f32(h1), f32(h2)) * (1.0 / 4294967296.0);
-}`,
-  },
-  // ボロノイ/セルラーノイズ(F1: 最近傍のジッタ格子点までの距離)。近傍 3x3(2D)/
-  // 3x3x3(3D)を総当たりする定数境界ループなので、動的な N のループ機構
-  // (ir.ts の loop ノード)ではなく素の WGSL for でよい
-  voronoi2: {
-    deps: ["hash22"],
-    src: `fn voronoi2(p: vec2f, s: f32) -> f32 {
-  let q = p / max(s, 1e-6);
-  let i = floor(q);
-  let f = fract(q);
-  var minD = 8.0;
-  for (var y = -1; y <= 1; y = y + 1) {
-    for (var x = -1; x <= 1; x = x + 1) {
-      let g = vec2f(f32(x), f32(y));
-      let o = hash22(i + g);
-      let r = g + o - f;
-      minD = min(minD, length(r));
-    }
-  }
-  return clamp(minD, 0.0, 1.0);
-}`,
-  },
-  voronoi3: {
-    deps: ["hash33"],
-    src: `fn voronoi3(p: vec3f, s: f32) -> f32 {
-  let q = p / max(s, 1e-6);
-  let i = floor(q);
-  let f = fract(q);
-  var minD = 8.0;
-  for (var z = -1; z <= 1; z = z + 1) {
-    for (var y = -1; y <= 1; y = y + 1) {
-      for (var x = -1; x <= 1; x = x + 1) {
-        let g = vec3f(f32(x), f32(y), f32(z));
-        let o = hash33(i + g);
-        let r = g + o - f;
-        minD = min(minD, length(r));
-      }
-    }
-  }
-  return clamp(minD, 0.0, 1.0);
-}`,
-  },
-  noise2d: {
-    deps: ["hash12"],
-    src: `fn noise2d(p: vec2f) -> f32 {
-  let i = floor(p); let f = fract(p);
-  let u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash12(i), hash12(i + vec2f(1.0, 0.0)), u.x),
-             mix(hash12(i + vec2f(0.0, 1.0)), hash12(i + vec2f(1.0, 1.0)), u.x), u.y);
-}`,
-  },
-  noise3d: {
-    deps: ["hash13"],
-    src: `fn noise3d(p: vec3f) -> f32 {
-  let i = floor(p); let f = fract(p);
-  let u = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(mix(hash13(i), hash13(i + vec3f(1.0, 0.0, 0.0)), u.x),
-        mix(hash13(i + vec3f(0.0, 1.0, 0.0)), hash13(i + vec3f(1.0, 1.0, 0.0)), u.x), u.y),
-    mix(mix(hash13(i + vec3f(0.0, 0.0, 1.0)), hash13(i + vec3f(1.0, 0.0, 1.0)), u.x),
-        mix(hash13(i + vec3f(0.0, 1.0, 1.0)), hash13(i + vec3f(1.0, 1.0, 1.0)), u.x), u.y),
-    u.z);
-}`,
-  },
-  noise2v: {
-    deps: ["noise2d", "noise3d"],
-    src: `fn noise2v(p: vec2f) -> vec2f {
-  return vec2f(noise2d(p), noise2d(p + vec2f(17.13, 9.57)));
-}`,
-  },
-  fbm2: {
-    deps: ["noise2d"],
-    src: `fn fbm2(p: vec2f) -> f32 {
-  var v = 0.0; var a = 0.5; var q = p;
-  for (var i = 0; i < 5; i++) {
-    v += a * noise2d(q); q = q * 2.03 + vec2f(11.3, 7.9); a *= 0.5;
-  }
-  return v;
-}`,
-  },
-  fbm3: {
-    deps: ["noise3d"],
-    src: `fn fbm3(p: vec3f) -> f32 {
-  var v = 0.0; var a = 0.5; var q = p;
-  for (var i = 0; i < 5; i++) {
-    v += a * noise3d(q); q = q * 2.03 + vec3f(11.3, 7.9, 5.1); a *= 0.5;
-  }
-  return v;
-}`,
-  },
-  curl2: {
-    deps: ["noise2d"],
-    src: `fn curl2(p: vec2f) -> vec2f {
-  let e = 0.01;
-  let dx = noise2d(p + vec2f(e, 0.0)) - noise2d(p - vec2f(e, 0.0));
-  let dy = noise2d(p + vec2f(0.0, e)) - noise2d(p - vec2f(0.0, e));
-  return vec2f(dy, -dx) / (2.0 * e);
-}`,
-  },
-  onSphere: {
-    src: `fn onSphere(u: vec2f) -> vec3f {
-  let z = u.x * 2.0 - 1.0;
-  let a = u.y * 6.28318530718;
-  let r = sqrt(max(0.0, 1.0 - z * z));
-  return vec3f(r * cos(a), r * sin(a), z);
-}`,
-  },
-  rot2: {
-    src: `fn rot2(p: vec2f, a: f32) -> vec2f {
-  let c = cos(a); let s = sin(a);
-  return vec2f(c * p.x + s * p.y, -s * p.x + c * p.y);
-}`,
-  },
-  rotX: {
-    src: `fn rotX(p: vec3f, a: f32) -> vec3f {
-  let c = cos(a); let s = sin(a);
-  return vec3f(p.x, c * p.y + s * p.z, -s * p.y + c * p.z);
-}`,
-  },
-  rotY: {
-    src: `fn rotY(p: vec3f, a: f32) -> vec3f {
-  let c = cos(a); let s = sin(a);
-  return vec3f(c * p.x - s * p.z, p.y, s * p.x + c * p.z);
-}`,
-  },
-  rotZ: {
-    src: `fn rotZ(p: vec3f, a: f32) -> vec3f {
-  let c = cos(a); let s = sin(a);
-  return vec3f(c * p.x + s * p.y, -s * p.x + c * p.y, p.z);
-}`,
-  },
-  twistY: {
-    src: `fn twistY(p: vec3f, k: f32) -> vec3f {
-  let a = p.y * k;
-  let c = cos(a); let s = sin(a);
-  return vec3f(c * p.x - s * p.z, p.y, s * p.x + c * p.z);
-}`,
-  },
-  sdBox2: {
-    src: `fn sdBox2(p: vec2f, b: vec2f) -> f32 {
-  let q = abs(p) - b;
-  return length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0);
-}`,
-  },
-  sdBox3: {
-    src: `fn sdBox3(p: vec3f, b: vec3f) -> f32 {
-  let q = abs(p) - b;
-  return length(max(q, vec3f(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
-}`,
-  },
-  sdTri: {
-    src: `fn sdTri(pin: vec2f, r: f32) -> f32 {
-  let k = sqrt(3.0);
-  var p = vec2f(abs(pin.x) - r, -pin.y + r / k);
-  if (p.x + k * p.y > 0.0) { p = vec2f(p.x - k * p.y, -k * p.x - p.y) / 2.0; }
-  p.x -= clamp(p.x, -2.0 * r, 0.0);
-  return -length(p) * sign(p.y);
-}`,
-  },
-  smin: {
-    src: `fn smin(a: f32, b: f32, k: f32) -> f32 {
-  let kk = max(k, 1e-4);
-  let h = clamp(0.5 + 0.5 * (b - a) / kk, 0.0, 1.0);
-  return mix(b, a, h) - kk * h * (1.0 - h);
-}`,
-  },
-  sminH: {
-    src: `fn sminH(a: f32, b: f32, k: f32) -> f32 {
-  return clamp(0.5 + 0.5 * (b - a) / max(k, 1e-4), 0.0, 1.0);
-}`,
-  },
-  hsv2rgb: {
-    src: `fn hsv2rgb(c: vec3f) -> vec3f {
-  let k = fract(vec3f(c.x, c.x + 2.0 / 3.0, c.x + 1.0 / 3.0)) * 6.0;
-  let rgb = clamp(abs(k - 3.0) - 1.0, vec3f(0.0), vec3f(1.0));
-  return c.z * mix(vec3f(1.0), rgb, c.y);
-}`,
-  },
-  overBlend: {
-    src: `fn overBlend(top: vec4f, bot: vec4f) -> vec4f {
-  let a = top.w + bot.w * (1.0 - top.w);
-  let rgb = top.rgb * top.w + bot.rgb * bot.w * (1.0 - top.w);
-  return vec4f(rgb / max(a, 1e-5), a);
-}`,
-  },
-  // top は premultiplied(scene テクスチャの中身 = strip パスが rgb*cov, cov で出したもの)、
-  // bot は straight alpha(背景場)。premultiplied-over で合成し straight alpha で返す。
-  // 2Dストリップを bloom 前の scene テクスチャへ焼き込み、場からサンプルするために使う(ADR-0044)
-  overPremul: {
-    src: `fn overPremul(top: vec4f, bot: vec4f) -> vec4f {
-  let a = top.w + bot.w * (1.0 - top.w);
-  let rgb = top.rgb + bot.rgb * bot.w * (1.0 - top.w);
-  return vec4f(rgb / max(a, 1e-5), a);
-}`,
-  },
-  shadeLambert: {
-    src: `fn shadeLambert(base: vec4f, n: vec3f, rd: vec3f, l: vec3f) -> vec4f {
-  let ndl = max(dot(n, l), 0.0);
-  let diff = base.rgb * (0.18 + 0.82 * ndl);
-  let spec = pow(max(dot(reflect(rd, n), l), 0.0), 24.0) * 0.35;
-  return vec4f(diff + vec3f(spec), base.w);
-}`,
-  },
-  fogMix: {
-    src: `fn fogMix(base: vec4f, fogc: vec4f, k: f32, d: f32) -> vec4f {
-  let f = 1.0 - exp(-k * d);
-  return vec4f(mix(base.rgb, fogc.rgb, f), base.w);
-}`,
-  },
-  brightPass: {
-    src: `fn brightPass(c: vec4f) -> vec4f {
-  return vec4f(max(c.rgb - vec3f(0.55), vec3f(0.0)), 0.0);
-}`,
-  },
-  tonemapReinhard: {
-    // 輝度ベースのReinhardトーンマッピング(ADR-0020)。HDR(1.0超え)の最終合成
-    // 結果を表示用の0..1へ丸める。チャネルごとではなく輝度で1本のスケールを
-    // かけるので、明るい部分でも色相・彩度が保たれる
-    src: `fn tonemapReinhard(c: vec3f) -> vec3f {
-  let l = dot(c, vec3f(0.2126, 0.7152, 0.0722));
-  return c / (1.0 + l);
-}`,
-  },
-  grainNoise: {
-    deps: ["hash12"],
-    src: `fn grainNoise(p: vec2f, t: f32) -> f32 {
-  return hash12(p * 913.7 + vec2f(t * 61.3, t * 12.9)) - 0.5;
-}`,
-  },
-  vignetteFn: {
-    src: `fn vignetteFn(c: vec4f, p: vec2f, k: f32) -> vec4f {
-  let v = 1.0 - k * smoothstep(0.55, 1.6, length(p));
-  return vec4f(c.rgb * v, c.w);
-}`,
-  },
-  worldToUv: {
-    src: `fn worldToUv(p: vec2f) -> vec2f {
-  let res = UH.xy;
-  let aspect = res.x / max(res.y, 1.0);
-  var s: vec2f;
-  if (aspect >= 1.0) { s = vec2f(aspect, -1.0); } else { s = vec2f(1.0, -1.0 / aspect); }
-  return (p / s + 1.0) * 0.5;
-}`,
-  },
-  uvToWorld: {
-    src: `fn uvToWorld(uv: vec2f) -> vec2f {
-  let res = UH.xy;
-  let aspect = res.x / max(res.y, 1.0);
-  var s: vec2f;
-  if (aspect >= 1.0) { s = vec2f(aspect, -1.0); } else { s = vec2f(1.0, -1.0 / aspect); }
-  return (uv * 2.0 - 1.0) * s;
-}`,
-  },
-  gridUv: {
-    src: `fn gridUv(p: vec2f) -> vec2f {
-  return (vec2f(p.x, -p.y) + 1.0) * 0.5;
-}`,
-  },
-  gridWorld: {
-    src: `fn gridWorld(uv: vec2f) -> vec2f {
-  let q = uv * 2.0 - 1.0;
-  return vec2f(q.x, -q.y);
-}`,
-  },
-  // ワールド座標 → クリップ空間(uvToWorld の逆変換)。line/bezier の instanced
-  // strip パス(ADR-0016)の頂点シェーダで、ジオメトリを直接クリップ空間に置くのに使う
-  worldToClip: {
-    src: `fn worldToClip(p: vec2f) -> vec2f {
-  let res = UH.xy;
-  let aspect = res.x / max(res.y, 1.0);
-  var s: vec2f;
-  if (aspect >= 1.0) { s = vec2f(aspect, -1.0); } else { s = vec2f(1.0, -1.0 / aspect); }
-  return vec2f(p.x / s.x, -p.y / s.y);
-}`,
-  },
-};
 
 /**
  * "call" IR ノードの fn 名を WGSL 側が解決できるか(WGSL 組み込み or LIB エントリ)。
@@ -980,58 +629,28 @@ function assemble(
     .replaceAll("US[", "U.slots[");
 }
 
-export function generateWGSL(staged: StagedProgram): CompiledProgram {
-  const arena = staged.arena;
+/** パス emitter 群が共有するコンテキスト(候補2: generateWGSL のパス種別分割) */
+interface EmitCtx {
+  arena: IRArena;
+  layout: UniformLayout;
+  inputIndex: Map<string, number>;
+  ffiSrcs: string[];
+  inputs: string[];
+}
 
-  // ---- ループ不変式の巻き上げ ----
-  // 座標に依存しない粒子位置などをフレームに1回の DataPass へ(パーティクル系の要)。
-  // dist と colour は同じループ id を含むので、書き換えは全ルートに一括で適用する
-  const dataPasses: DataPassIR[] = [];
-  const hoisted = new Set<number>();
-  const hoist = (root: NodeId): NodeId => {
-    const before = dataPasses.length;
-    const r = transformLoops(arena, root, dataPasses);
-    // 同じループが複数ルートから巻き上げられたら1つに統合
-    for (let i = dataPasses.length - 1; i >= before; i--) {
-      if (hoisted.has(dataPasses[i].loopId)) dataPasses.splice(i, 1);
-      else hoisted.add(dataPasses[i].loopId);
-    }
-    return r;
-  };
-  const imageRoot = hoist(staged.imageRoot);
-  const raymarches = staged.raymarches.map((r) => ({
-    ...r,
-    dist: hoist(r.dist),
-    colour: hoist(r.colour),
-  }));
-  const blooms = staged.blooms.map((b) => ({ ...b, extract: hoist(b.extract) }));
+function newScope(): EmitScope {
+  return { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+}
 
-  // 全パスのルートを集めて入力スロットを決める(プログラム内で共通のレイアウト)
-  const allRoots: NodeId[] = [imageRoot];
-  for (const s of staged.sims) allRoots.push(...s.initRoots, ...s.updateRoots);
-  for (const r of raymarches) allRoots.push(r.dist, r.colour, r.eye, r.target, r.fov);
-  for (const d of dataPasses) allRoots.push(...d.roots);
-  for (const sb of staged.stripBatches) allRoots.push(sb.p0IR, sb.p1IR, sb.p2IR, sb.widthIR, sb.colourIR);
-  for (const r of raymarches) {
-    for (const sb of r.strip3Batches ?? []) allRoots.push(sb.p0IR, sb.p1IR, sb.p2IR, sb.widthIR, sb.colourIR);
-  }
-  for (const b of blooms) allRoots.push(b.extract);
-  const inputs = collectInputs(arena, allRoots);
-  const literalCount = arena.uniforms.length;
-  const literalBase = inputs.length;
-  const slotCount = Math.max(1, Math.ceil((inputs.length + literalCount) / 4));
-  const layout: UniformLayout = { inputs, literalBase, literalCount, slotCount };
-  const inputIndex = new Map(inputs.map((n, i) => [n, i]));
-
-  const ffiSrcs = staged.ffiFns.map((f) => f.src);
+// ---- Simulate パス(init と update の2種) ----
+function emitSimPasses(ectx: EmitCtx, sims: SimPassSpec[]): CompiledPass[] {
+  const { arena, layout, inputIndex, ffiSrcs, inputs } = ectx;
   const passes: CompiledPass[] = [];
-
-  // ---- Simulate パス(init と update の2種) ----
-  for (const sim of staged.sims) {
+  for (const sim of sims) {
     for (const phase of ["init", "update"] as const) {
       const roots = phase === "init" ? sim.initRoots : sim.updateRoots;
       const cg = new Codegen(arena, layout, inputIndex);
-      const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+      const scope = newScope();
       // 座標: グリッドはワールド座標、配列はインデックス
       const coordId = arena.node({ k: "coord", t: "vec2" });
       scope.names.set(coordId, "P");
@@ -1064,11 +683,16 @@ ${scope.lines.join("\n")}
       });
     }
   }
+  return passes;
+}
 
-  // ---- Data パス(巻き上げたループ不変式。フレームに1回、N テクセル) ----
+// ---- Data パス(巻き上げたループ不変式。フレームに1回、N テクセル) ----
+function emitDataPasses(ectx: EmitCtx, dataPasses: DataPassIR[]): CompiledPass[] {
+  const { arena, layout, inputIndex, ffiSrcs, inputs } = ectx;
+  const passes: CompiledPass[] = [];
   for (const dp of dataPasses) {
     const cg = new Codegen(arena, layout, inputIndex);
-    const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+    const scope = newScope();
     const coordId = arena.node({ k: "coord", t: "vec2" });
     scope.names.set(coordId, "P");
     const outs = dp.roots.map((r) => cg.emit(r, scope));
@@ -1094,23 +718,29 @@ ${scope.lines.join("\n")}
       lineSpans: [],
     });
   }
+  return passes;
+}
 
-  // ---- Raymarch パス ----
+// ---- Raymarch パス(+ sprite / strip3d の instanced 描画。ADR-0014・ADR-0036) ----
+function emitRaymarchPasses(ectx: EmitCtx, raymarches: RaymarchPassSpec[]): CompiledPass[] {
+  const { arena, layout, inputIndex, ffiSrcs, inputs } = ectx;
+  const passes: CompiledPass[] = [];
+  const STRIP3D_SEGMENTS = 16;
   for (const rm of raymarches) {
     const cg = new Codegen(arena, layout, inputIndex);
     // dist 関数
-    const distScope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+    const distScope = newScope();
     const coord3 = arena.node({ k: "coord", t: "vec3" });
     distScope.names.set(coord3, "P");
     const distOut = cg.emit(rm.dist, distScope);
     const mapFn = `fn rmMap(P: vec3f) -> f32 {\n${distScope.lines.join("\n")}\n  return ${distOut};\n}`;
     // colour 関数(rmctx: N/RD/RT)
-    const colScope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+    const colScope = newScope();
     colScope.names.set(coord3, "P");
     const colOut = cg.emit(rm.colour, colScope);
     const colFn = `fn rmCol(P: vec3f, N: vec3f, RD: vec3f, RT: f32) -> vec4f {\n${colScope.lines.join("\n")}\n  return ${colOut};\n}`;
     // カメラ式
-    const camScope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+    const camScope = newScope();
     const eye = cg.emit(rm.eye, camScope);
     const target = cg.emit(rm.target, camScope);
     const fov = cg.emit(rm.fov, camScope);
@@ -1166,7 +796,7 @@ ${camScope.lines.join("\n")}
       lineSpans: [],
     });
 
-    // ---- Sprite パス(scatter の instanced 描画。ADR-0014) ----
+    // ---- Sprite パス(scatter の点状パーティクルの instanced 描画。ADR-0014) ----
     // CSG ループの代わりに「フレームに1回、N テクセルの位置/色データパス」+
     // 「N インスタンスのビルボード描画」で粒子を出す。dist は既に定数 +∞ に
     // すり替え済みなので、レイマーチの合成には一切参加しない
@@ -1174,7 +804,7 @@ ${camScope.lines.join("\n")}
       const dataKey = `sprite:${batch.loopId}`;
       {
         const cg2 = new Codegen(arena, layout, inputIndex);
-        const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+        const scope = newScope();
         const coord2 = arena.node({ k: "coord", t: "vec2" });
         scope.names.set(coord2, "P");
         // loopi(batch.loopId) をこのデータパスの索引(P.x)に置換してから emit する
@@ -1210,7 +840,7 @@ ${scope.lines.join("\n")}
         const cg3 = new Codegen(arena, layout, inputIndex);
         const posTex = cg3.texture(`${dataKey}:0`);
         const colTex = cg3.texture(`${dataKey}:1`);
-        const camScope3: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+        const camScope3 = newScope();
         const eye3 = cg3.emit(rm.eye, camScope3);
         const target3 = cg3.emit(rm.target, camScope3);
         const fov3 = cg3.emit(rm.fov, camScope3);
@@ -1281,13 +911,12 @@ fn fs_main(in: SpriteVOut) -> @location(0) vec4f {
     // sprite(ADR-0014)と同じく、march 不要・深度テストなし・レイマーチ結果に
     // 重ね描き。カメラ向きのリボン(進行方向と視線方向の外積で幅方向を決める)を
     // 1ベジエ STRIP3D_SEGMENTS 個の直線に分割して近似する(2D strip と同じ手法)
-    const STRIP3D_SEGMENTS = 16;
     for (const batch of rm.strip3Batches ?? []) {
       const dataKey = `strip3:${batch.loopId}`;
       {
         // データパス: tex0=vec4(p0,width), tex1=vec4(p1,0), tex2=vec4(p2,0), tex3=colour
         const cg2 = new Codegen(arena, layout, inputIndex);
-        const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+        const scope = newScope();
         const coord2 = arena.node({ k: "coord", t: "vec2" });
         scope.names.set(coord2, "P");
         const idxNode = arena.node({ k: "swiz", a: coord2, sel: "x", t: "f32" });
@@ -1337,7 +966,7 @@ ${scope.lines.join("\n")}
         const tex1 = cg3.texture(`${dataKey}:1`);
         const tex2 = cg3.texture(`${dataKey}:2`);
         const tex3 = cg3.texture(`${dataKey}:3`);
-        const camScope4: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+        const camScope4 = newScope();
         const eye4 = cg3.emit(rm.eye, camScope4);
         const target4 = cg3.emit(rm.target, camScope4);
         const fov4 = cg3.emit(rm.fov, camScope4);
@@ -1418,28 +1047,33 @@ fn fs_main(in: Strip3VOut) -> @location(0) vec4f {
       }
     }
   }
+  return passes;
+}
 
-  // ---- Bloom パス連鎖(ダウンサンプル+ブラー、ADR-0019・ADR-0020・ADR-0025) ----
-  // 各 bloom() 呼び出しにつき native(フル解像度、ユーザーの式に依存) →
-  // e(1/2、native からの固定ボックスフィルタ)→ down1..downN(1/4, 1/8, ...、
-  // 同じ固定ボックスフィルタで段階的に縮小) → upN-1..up0(小さい方を
-  // bilinearアップサンプル+同解像度のスキップ接続を加算しながら段階的に
-  // 拡大、up0=FINALを image パスがサンプルする)という連鎖にする。
-  // native → e の1段を追加したのは ADR-0025: 以前は e をユーザーの式から
-  // 直接「半解像度」で評価していたため、シーン側のアンチエイリアス
-  // (smoothstep の px)が前提とするネイティブ解像度と、実際のサンプリング
-  // 密度がずれ、規則的な繰り返し構造(例: grid の上の小さな box)がモアレを
-  // 起こしていた。ユーザーの式はネイティブ解像度で一度だけ評価し、そこから
-  // 先は全て検証済みのボックスフィルタでのダウンサンプルに統一する
-  // 段数(bloom() 呼び出しごとの b.levels)を増やすほど実効ブラー半径が
-  // 広がる。以前は全呼び出し共通の固定6段だったが、シーンのスケールに対して
-  // 段数が合わないと(例: 密なグリッドの上に大きな固定半径)、bloomの一番粗い
-  // ミップの解像度がシーンの繰り返し構造と一致してモアレ状に見える問題があった。
-  // `bloom k x` の `k`(静的に決まる場合)から適応的に決める(ADR-0024。
-  // k が大きい=強く光らせたいほど段数を増やす)。段数を増やしても各段は解像度が
-  // 下がっていくので計算コストの増分は小さい。ダウンサンプル/アップサンプル
-  // 自体はユーザーコードに依存しない固定 shader なので Codegen の IR emit を
-  // 経由しない
+// ---- Bloom パス連鎖(ダウンサンプル+ブラー、ADR-0019・ADR-0020・ADR-0025) ----
+// 各 bloom() 呼び出しにつき native(フル解像度、ユーザーの式に依存) →
+// e(1/2、native からの固定ボックスフィルタ)→ down1..downN(1/4, 1/8, ...、
+// 同じ固定ボックスフィルタで段階的に縮小) → upN-1..up0(小さい方を
+// bilinearアップサンプル+同解像度のスキップ接続を加算しながら段階的に
+// 拡大、up0=FINALを image パスがサンプルする)という連鎖にする。
+// native → e の1段を追加したのは ADR-0025: 以前は e をユーザーの式から
+// 直接「半解像度」で評価していたため、シーン側のアンチエイリアス
+// (smoothstep の px)が前提とするネイティブ解像度と、実際のサンプリング
+// 密度がずれ、規則的な繰り返し構造(例: grid の上の小さな box)がモアレを
+// 起こしていた。ユーザーの式はネイティブ解像度で一度だけ評価し、そこから
+// 先は全て検証済みのボックスフィルタでのダウンサンプルに統一する
+// 段数(bloom() 呼び出しごとの b.levels)を増やすほど実効ブラー半径が
+// 広がる。以前は全呼び出し共通の固定6段だったが、シーンのスケールに対して
+// 段数が合わないと(例: 密なグリッドの上に大きな固定半径)、bloomの一番粗い
+// ミップの解像度がシーンの繰り返し構造と一致してモアレ状に見える問題があった。
+// `bloom k x` の `k`(静的に決まる場合)から適応的に決める(ADR-0024。
+// k が大きい=強く光らせたいほど段数を増やす)。段数を増やしても各段は解像度が
+// 下がっていくので計算コストの増分は小さい。ダウンサンプル/アップサンプル
+// 自体はユーザーコードに依存しない固定 shader なので Codegen の IR emit を
+// 経由しない
+function emitBloomPasses(ectx: EmitCtx, blooms: BloomPassSpec[]): CompiledPass[] {
+  const { arena, layout, inputIndex, ffiSrcs, inputs } = ectx;
+  const passes: CompiledPass[] = [];
   for (const b of blooms) {
     const BLOOM_LEVELS = b.levels;
     const nativeKey = `bloom:${b.id}:n`;
@@ -1458,7 +1092,7 @@ fn fs_main(in: Strip3VOut) -> @location(0) vec4f {
     {
       const cg = new Codegen(arena, layout, inputIndex);
       cg.lib("uvToWorld");
-      const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+      const scope = newScope();
       const coordId = arena.node({ k: "coord", t: "vec2" });
       scope.names.set(coordId, "P");
       const out = cg.emit(b.extract, scope);
@@ -1569,17 +1203,20 @@ fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
       upsample(smallKey, skipKey, upKey(i), 2 ** (i + 1));
     }
   }
+  return passes;
+}
 
-  // ---- Image パス(最終 2D) ----
-  {
-    const cg = new Codegen(arena, layout, inputIndex);
-    cg.lib("uvToWorld");
-    cg.lib("tonemapReinhard");
-    const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
-    const coordId = arena.node({ k: "coord", t: "vec2" });
-    scope.names.set(coordId, "P");
-    const out = cg.emit(imageRoot, scope);
-    const fs = `@fragment
+// ---- Image パス(最終 2D) ----
+function emitImagePass(ectx: EmitCtx, imageRoot: NodeId): CompiledPass {
+  const { arena, layout, inputIndex, ffiSrcs, inputs } = ectx;
+  const cg = new Codegen(arena, layout, inputIndex);
+  cg.lib("uvToWorld");
+  cg.lib("tonemapReinhard");
+  const scope = newScope();
+  const coordId = arena.node({ k: "coord", t: "vec2" });
+  scope.names.set(coordId, "P");
+  const out = cg.emit(imageRoot, scope);
+  const fs = `@fragment
 fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let res = U.header.xy;
   let P = uvToWorld(pos.xy / res);
@@ -1588,27 +1225,31 @@ ${scope.lines.join("\n")}
   let mapped = tonemapReinhard(c.rgb);
   return vec4f(mapped * c.a, c.a);
 }`;
-    const code = assemble(cg, "", fs, 1, ffiSrcs);
-    passes.push({
-      kind: "image",
-      code,
-      targets: 1,
-      textures: cg.usedTex,
-      hash: fnv1a("img:" + arena.structuralHash([imageRoot]) + ":" + inputs.join(",")),
-      lineSpans: [],
-    });
-  }
+  const code = assemble(cg, "", fs, 1, ffiSrcs);
+  return {
+    kind: "image",
+    code,
+    targets: 1,
+    textures: cg.usedTex,
+    hash: fnv1a("img:" + arena.structuralHash([imageRoot]) + ":" + inputs.join(",")),
+    lineSpans: [],
+  };
+}
 
-  // ---- Strip パス(line/bezier の instanced 描画。ADR-0016) ----
-  // march 不要: パスに沿って幅方向へ押し出した三角形ストリップを直接ラスタライズし、
-  // 最終画像(colorTex)に上描きする。1ベジエを SEGMENTS 個の直線に分割して近似する
+// ---- Strip パス(2D line/bezier の instanced 描画。ADR-0016・ADR-0044) ----
+// march 不要: パスに沿って幅方向へ押し出した三角形ストリップを直接ラスタライズし、
+// bloom 前の HDR scene テクスチャに焼き込む(ADR-0044)。1ベジエを SEGMENTS 個の
+// 直線に分割して近似する
+function emitStripPasses(ectx: EmitCtx, stripBatches: StripBatchSpec[]): CompiledPass[] {
+  const { arena, layout, inputIndex, ffiSrcs, inputs } = ectx;
+  const passes: CompiledPass[] = [];
   const STRIP_SEGMENTS = 16;
-  for (const batch of staged.stripBatches) {
+  for (const batch of stripBatches) {
     const dataKey = `strip:${batch.loopId}`;
     {
       // データパス: tex0=vec4(p0,p2), tex1=vec4(p1,width), tex2=colour
       const cg2 = new Codegen(arena, layout, inputIndex);
-      const scope: EmitScope = { lines: [], names: new Map(), indent: "  ", loopId: null, parent: null };
+      const scope = newScope();
       const coord2 = arena.node({ k: "coord", t: "vec2" });
       scope.names.set(coord2, "P");
       const idxNode = arena.node({ k: "swiz", a: coord2, sel: "x", t: "f32" });
@@ -1703,6 +1344,61 @@ fn fs_main(in: StripVOut) -> @location(0) vec4f {
       });
     }
   }
+  return passes;
+}
+
+export function generateWGSL(staged: StagedProgram): CompiledProgram {
+  const arena = staged.arena;
+
+  // ---- ループ不変式の巻き上げ ----
+  // 座標に依存しない粒子位置などをフレームに1回の DataPass へ(パーティクル系の要)。
+  // dist と colour は同じループ id を含むので、書き換えは全ルートに一括で適用する
+  const dataPasses: DataPassIR[] = [];
+  const hoisted = new Set<number>();
+  const hoist = (root: NodeId): NodeId => {
+    const before = dataPasses.length;
+    const r = transformLoops(arena, root, dataPasses);
+    // 同じループが複数ルートから巻き上げられたら1つに統合
+    for (let i = dataPasses.length - 1; i >= before; i--) {
+      if (hoisted.has(dataPasses[i].loopId)) dataPasses.splice(i, 1);
+      else hoisted.add(dataPasses[i].loopId);
+    }
+    return r;
+  };
+  const imageRoot = hoist(staged.imageRoot);
+  const raymarches = staged.raymarches.map((r) => ({
+    ...r,
+    dist: hoist(r.dist),
+    colour: hoist(r.colour),
+  }));
+  const blooms = staged.blooms.map((b) => ({ ...b, extract: hoist(b.extract) }));
+
+  // 全パスのルートを集めて入力スロットを決める(プログラム内で共通のレイアウト)
+  const allRoots: NodeId[] = [imageRoot];
+  for (const s of staged.sims) allRoots.push(...s.initRoots, ...s.updateRoots);
+  for (const r of raymarches) allRoots.push(r.dist, r.colour, r.eye, r.target, r.fov);
+  for (const d of dataPasses) allRoots.push(...d.roots);
+  for (const sb of staged.stripBatches) allRoots.push(sb.p0IR, sb.p1IR, sb.p2IR, sb.widthIR, sb.colourIR);
+  for (const r of raymarches) {
+    for (const sb of r.strip3Batches ?? []) allRoots.push(sb.p0IR, sb.p1IR, sb.p2IR, sb.widthIR, sb.colourIR);
+  }
+  for (const b of blooms) allRoots.push(b.extract);
+  const inputs = collectInputs(arena, allRoots);
+  const literalCount = arena.uniforms.length;
+  const literalBase = inputs.length;
+  const slotCount = Math.max(1, Math.ceil((inputs.length + literalCount) / 4));
+  const layout: UniformLayout = { inputs, literalBase, literalCount, slotCount };
+  const inputIndex = new Map(inputs.map((n, i) => [n, i]));
+
+  const ectx: EmitCtx = { arena, layout, inputIndex, ffiSrcs: staged.ffiFns.map((f) => f.src), inputs };
+  const passes: CompiledPass[] = [
+    ...emitSimPasses(ectx, staged.sims),
+    ...emitDataPasses(ectx, dataPasses),
+    ...emitRaymarchPasses(ectx, raymarches),
+    ...emitBloomPasses(ectx, blooms),
+    emitImagePass(ectx, imageRoot),
+    ...emitStripPasses(ectx, staged.stripBatches),
+  ];
 
   // パイプラインの誤共有を防ぐため、uniform スロット数とテクスチャ構成もハッシュに含める
   // (シェーダ本文の array<vec4f, N> とバインディング数がキャッシュキーに効く)
