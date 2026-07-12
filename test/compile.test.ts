@@ -277,6 +277,37 @@ test("glitch は image パスにコンパイルされる", () => {
   assert.match(image!.code, /hash11/);
 });
 
+test("scatter された bezier/point/line に場の色を fill しても instanced 描画に昇格する(色フィールドのマーカー伝播)", () => {
+  // 従来は fill に場(VField)を渡すと座標依存を理由に sprite/strip マーカーを
+  // 無条件 undefined にしていた。今は sprite の center / strip の端点の中点
+  // (どちらも loopi のみ依存)で場を1回評価し「粒子ごとに違う色」として伝播する
+  const strip2D = compile(`out (scatter 40 \\i ->
+    let a0 = hash i * 6.283185
+        p0 = [cos a0, sin a0] * 0.5
+        p1 = [cos (a0+1.0), sin (a0+1.0)] * 0.8
+    in bezier p0 ((p0+p1)*0.5) p1
+       |> outline 0.004
+       |> fill (ramp [red, blue] (noise 2)))`);
+  assert.equal(strip2D.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(strip2D.diagnostics));
+  assert.ok(strip2D.program);
+  assert.ok(strip2D.program!.passes.some((p) => p.kind === "strip" && p.stripCount === 40), JSON.stringify(strip2D.program!.passes));
+
+  const sprite = compile(`out (render (orbit 6 0.1) (scatter 100 \\i ->
+    point 0.02
+    |> move (onSphere (hash2 i))
+    |> fill (ramp [red, blue] (fbm 3))))`);
+  assert.equal(sprite.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(sprite.diagnostics));
+  assert.ok(sprite.program);
+  assert.ok(sprite.program!.passes.some((p) => p.kind === "sprite" && p.spriteCount === 100), JSON.stringify(sprite.program!.passes));
+
+  const strip3D = compile(`out (render (orbit 6 0.1) (scatter 30 \\i ->
+    line (onSphere (hash2 i)) (onSphere (hash2 (i + 99))) 0.01
+    |> fill (ramp [red, blue] (fbm 3))))`);
+  assert.equal(strip3D.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(strip3D.diagnostics));
+  assert.ok(strip3D.program);
+  assert.ok(strip3D.program!.passes.some((p) => p.kind === "strip3d" && p.strip3Count === 30), JSON.stringify(strip3D.program!.passes));
+});
+
 test("大きな scatter は WGSL の for ループになる", () => {
   const r = compile(`out (scatter 300 \\i -> circle 0.01 |> move [hash i * 2 - 1, hash (i+7) * 2 - 1])`);
   assert.ok(r.program, JSON.stringify(r.diagnostics));

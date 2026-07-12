@@ -2,7 +2,7 @@
 
 import type { Span } from "../diag.ts";
 import type { NodeId } from "../ir.ts";
-import { asColor, asNum, asVec, call, constVec, describe, fail, recolorMarkers, toField, toShape, vecV } from "../ops.ts";
+import { asColor, asNum, asVec, call, constF, constVec, describe, fail, recolorMarkers, toField, toShape, vecV } from "../ops.ts";
 import type { Ctx, VField, VShape, VVec } from "../value.ts";
 import { bi, binIR, lifted } from "./shared.ts";
 import type { AddFn, AddVFn } from "./shared.ts";
@@ -36,13 +36,22 @@ export function installColor(add: AddFn, addV: AddVFn): void {
       const sh = toShape(ctx, x, span);
       if (colV.v === "field") {
         const cf = colV;
-        // 場は座標依存なのでスプライト/ストリップ伝播できない(安全にフォールバック)
+        // 場は座標依存だが、sprite/strip の中心・中点はループ索引にのみ依存するので
+        // そこで場を1回評価すれば「粒子ごとに違う色」として安全に伝播できる
+        // (scatter された point/line/bezier は sprite/strip 描画にしか経路がなく、
+        // 無条件に undefined にすると図形ごと消えていた)
+        const mid = (a: VVec, b: VVec, n: 2 | 3): VVec =>
+          vecV(n, binIR(ctx, "*", binIR(ctx, "+", a.ir, b.ir, n === 2 ? "vec2" : "vec3"), constF(ctx, 0.5).ir, n === 2 ? "vec2" : "vec3"));
         return {
           ...sh,
           colour: (c, p, s) => asColor(c, cf.fn(c, p, s), s),
-          sprite: undefined,
-          strip2D: undefined,
-          strip3D: undefined,
+          sprite: sh.sprite ? { ...sh.sprite, colour: asColor(ctx, cf.fn(ctx, sh.sprite.center, span), span) } : undefined,
+          strip2D: sh.strip2D
+            ? { ...sh.strip2D, colour: asColor(ctx, cf.fn(ctx, mid(sh.strip2D.p0, sh.strip2D.p2, 2), span), span) }
+            : undefined,
+          strip3D: sh.strip3D
+            ? { ...sh.strip3D, colour: asColor(ctx, cf.fn(ctx, mid(sh.strip3D.p0, sh.strip3D.p2, 3), span), span) }
+            : undefined,
         } as VShape;
       }
       const col = asColor(ctx, colV, span);
