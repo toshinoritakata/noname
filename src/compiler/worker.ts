@@ -46,6 +46,24 @@ async function handle(req: Req): Promise<void> {
       return;
     }
   }
-  const result = compile(src, glslFrontend ?? undefined);
+  // compile() 自体の例外は self.addEventListener("error") を発火しない(あれは
+  // 同期エラー用のグローバルハンドラで、async handle() 内の throw は unhandled
+  // rejection になるだけで親側に届かない)。ここで捕まえて診断として返さないと、
+  // 親側は 15 秒タイムアウトまで気づけず実際の例外メッセージも失われる
+  let result;
+  try {
+    result = compile(src, glslFrontend ?? undefined);
+  } catch (e) {
+    result = {
+      program: null,
+      diagnostics: [
+        {
+          severity: "error" as const,
+          message: `コンパイラが例外を投げました: ${e instanceof Error ? e.message : String(e)}`,
+          span: { start: 0, end: 0 },
+        },
+      ],
+    };
+  }
   (self as unknown as Worker).postMessage({ id, result });
 }
