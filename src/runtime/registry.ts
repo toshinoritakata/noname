@@ -2,7 +2,7 @@
 // 「プログラムは使い捨て、状態は永続」。simulate / prev の実体テクスチャはスロットではなく
 // ここが所有し、再評価時はキー(束縛名+型シグネチャ)照合で中身を引き継ぐ。
 
-import type { SimRuntimeSpec } from "../compiler/wgsl.ts";
+import type { SimRuntimeSpec } from "../compiler/pass-contract.ts";
 import { createWorkTexture, WORK_FORMAT } from "./gpu.ts";
 
 export interface SimEntry {

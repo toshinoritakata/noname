@@ -4,7 +4,17 @@
 
 import type { Diagnostic } from "../compiler/diag.ts";
 import { parseTexKey } from "../compiler/tex-keys.ts";
-import type { CompiledPass, CompiledProgram } from "../compiler/wgsl.ts";
+import {
+  BINDING_SAMPLER,
+  BINDING_UNIFORM,
+  inputOffset,
+  literalOffset,
+  pxOf,
+  textureBinding,
+  uniformFloatCount,
+  type CompiledPass,
+  type CompiledProgram,
+} from "../compiler/pass-contract.ts";
 import { cachedView, PipelineCache, viewId } from "./caches.ts";
 import { createWorkTexture, WORK_FORMAT } from "./gpu.ts";
 import type { BufferRegistry } from "./registry.ts";
@@ -43,7 +53,7 @@ export class ProgramSlot {
   constructor(device: GPUDevice, compiled: CompiledProgram) {
     this.device = device;
     this.compiled = compiled;
-    const floats = 4 + compiled.uniformLayout.slotCount * 4;
+    const floats = uniformFloatCount(compiled.uniformLayout);
     this.uniformData = new Float32Array(floats);
     this.uniformBuffer = device.createBuffer({
       size: floats * 4,
@@ -99,12 +109,12 @@ export class ProgramSlot {
         ? GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT
         : GPUShaderStage.FRAGMENT;
     const entries: GPUBindGroupLayoutEntry[] = [
-      { binding: 0, visibility: vis, buffer: { type: "uniform" } },
-      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+      { binding: BINDING_UNIFORM, visibility: vis, buffer: { type: "uniform" } },
+      { binding: BINDING_SAMPLER, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
     ];
     for (let i = 0; i < texCount; i++) {
       entries.push({
-        binding: i + 2,
+        binding: textureBinding(i),
         visibility: vis,
         texture: { sampleType: "float", viewDimension: "2d" },
       });
@@ -170,9 +180,9 @@ export class ProgramSlot {
     // data テクスチャは解像度に依存しないので一度だけ作る
     if (this.dataTex.size === 0) {
       for (const p of this.compiled.passes) {
-        if (p.kind === "data" && p.dataKey && p.dataCount) {
+        if (p.kind === "data") {
           const texs = Array.from({ length: p.targets }, (_, i) =>
-            createWorkTexture(this.device, p.dataCount!, 1, `slot:${p.dataKey}:${i}`),
+            createWorkTexture(this.device, p.dataCount, 1, `slot:${p.dataKey}:${i}`),
           );
           this.dataTex.set(p.dataKey, texs);
         }
@@ -191,7 +201,7 @@ export class ProgramSlot {
     for (const t of this.rmTex.values()) t.destroy();
     this.rmTex.clear();
     for (const p of this.compiled.passes) {
-      if (p.kind === "raymarch" && p.rmId !== undefined) {
+      if (p.kind === "raymarch") {
         const rw = p.halfRes ? Math.max(1, Math.floor(width / 2)) : width;
         const rh = p.halfRes ? Math.max(1, Math.floor(height / 2)) : height;
         this.rmTex.set(p.rmId, createWorkTexture(this.device, rw, rh, `slot:rm${p.rmId}`));
@@ -200,32 +210,26 @@ export class ProgramSlot {
     for (const t of this.bloomTex.values()) t.destroy();
     this.bloomTex.clear();
     for (const p of this.compiled.passes) {
-      if (
-        (p.kind === "bloom-extract" || p.kind === "bloom-down" || p.kind === "bloom-up") &&
-        p.bloomId !== undefined &&
-        p.bloomOutKey !== undefined &&
-        p.bloomResDivisor !== undefined
-      ) {
-        const bw = Math.max(1, Math.floor(width / p.bloomResDivisor));
-        const bh = Math.max(1, Math.floor(height / p.bloomResDivisor));
-        this.bloomTex.set(p.bloomOutKey, createWorkTexture(this.device, bw, bh, `slot:${p.bloomOutKey}`));
+      if (p.kind === "bloom-extract" || p.kind === "bloom-down" || p.kind === "bloom-up") {
+        const bw = Math.max(1, Math.floor(width / p.resDivisor));
+        const bh = Math.max(1, Math.floor(height / p.resDivisor));
+        this.bloomTex.set(p.outKey, createWorkTexture(this.device, bw, bh, `slot:${p.outKey}`));
       }
     }
   }
 
   writeUniforms(getInput: (name: string) => number, width: number, height: number): void {
     const d = this.uniformData;
-    const px = 2 / Math.max(1, Math.min(width, height));
     d[0] = width;
     d[1] = height;
-    d[2] = px;
+    d[2] = pxOf(width, height);
     d[3] = 0;
-    const { inputs, literalBase } = this.compiled.uniformLayout;
+    const { inputs } = this.compiled.uniformLayout;
     for (let i = 0; i < inputs.length; i++) {
-      d[4 + i] = getInput(inputs[i]);
+      d[inputOffset(i)] = getInput(inputs[i]);
     }
     for (let i = 0; i < this.compiled.literals.length; i++) {
-      d[4 + literalBase + i] = this.compiled.literals[i].value;
+      d[literalOffset(this.compiled.uniformLayout, i)] = this.compiled.literals[i].value;
     }
     this.device.queue.writeBuffer(this.uniformBuffer, 0, d.buffer, 0, d.byteLength);
   }
@@ -259,10 +263,10 @@ export class ProgramSlot {
     const hit = cache.get(key);
     if (hit) return hit;
     const entries: GPUBindGroupEntry[] = [
-      { binding: 0, resource: { buffer: this.uniformBuffer } },
-      { binding: 1, resource: this.sampler },
+      { binding: BINDING_UNIFORM, resource: { buffer: this.uniformBuffer } },
+      { binding: BINDING_SAMPLER, resource: this.sampler },
     ];
-    views.forEach((v, i) => entries.push({ binding: i + 2, resource: v }));
+    views.forEach((v, i) => entries.push({ binding: textureBinding(i), resource: v }));
     const bg = this.device.createBindGroup({ layout: pass.bindGroupLayout, entries });
     cache.set(key, bg);
     return bg;
@@ -305,7 +309,7 @@ export class ProgramSlot {
 
     // ---- data(ループ不変式の巻き上げ先。毎フレーム再計算 — time 依存があり得るため) ----
     for (const p of this.passes) {
-      if (p.spec.kind !== "data" || !p.spec.dataKey) continue;
+      if (p.spec.kind !== "data") continue;
       const texs = this.dataTex.get(p.spec.dataKey);
       if (!texs) continue;
       this.draw(encoder, p, texs.map((t) => cachedView(t)), resolve);
@@ -314,45 +318,45 @@ export class ProgramSlot {
     // ---- simulate: init(必要なら)→ update → swap ----
     for (const p of this.passes) {
       if (p.spec.kind !== "sim-init") continue;
-      const entry = registry.getSim(p.spec.simName!);
+      const entry = registry.getSim(p.spec.simName);
       if (!entry || !entry.needsInit) continue;
       this.runSimPass(encoder, p, entry.write.map((t) => cachedView(t)), resolve);
-      registry.swapSim(p.spec.simName!);
+      registry.swapSim(p.spec.simName);
       entry.needsInit = false;
     }
     if (stepSims) {
       for (const p of this.passes) {
         if (p.spec.kind !== "sim-update") continue;
-        const entry = registry.getSim(p.spec.simName!);
+        const entry = registry.getSim(p.spec.simName);
         if (!entry) continue;
         this.runSimPass(encoder, p, entry.write.map((t) => cachedView(t)), resolve);
-        registry.swapSim(p.spec.simName!);
+        registry.swapSim(p.spec.simName);
       }
     }
 
     // ---- raymarch ----
     for (const p of this.passes) {
       if (p.spec.kind !== "raymarch") continue;
-      const tex = this.rmTex.get(p.spec.rmId!);
+      const tex = this.rmTex.get(p.spec.rmId);
       if (!tex) continue;
       this.draw(encoder, p, [cachedView(tex)], resolve);
     }
 
     // ---- sprite(scatter の instanced 描画。レイマーチ結果に加算ブレンドで重ね描き。ADR-0014) ----
     for (const p of this.passes) {
-      if (p.spec.kind !== "sprite" || p.spec.spriteRmId === undefined) continue;
-      const tex = this.rmTex.get(p.spec.spriteRmId);
+      if (p.spec.kind !== "sprite") continue;
+      const tex = this.rmTex.get(p.spec.rmId);
       if (!tex) continue;
-      this.draw(encoder, p, [cachedView(tex)], resolve, "load", 6, p.spec.spriteCount ?? 1);
+      this.draw(encoder, p, [cachedView(tex)], resolve, "load", 6, p.spec.count);
     }
 
     // ---- strip3d(3D line/bezier の instanced 描画。sprite と同じくレイマーチ結果に
     // 深度テストなしで重ね描き。ADR-0036) ----
     for (const p of this.passes) {
-      if (p.spec.kind !== "strip3d" || p.spec.strip3RmId === undefined || p.spec.strip3VertexCount === undefined) continue;
-      const tex = this.rmTex.get(p.spec.strip3RmId);
+      if (p.spec.kind !== "strip3d") continue;
+      const tex = this.rmTex.get(p.spec.rmId);
       if (!tex) continue;
-      this.draw(encoder, p, [cachedView(tex)], resolve, "load", p.spec.strip3VertexCount, p.spec.strip3Count ?? 1);
+      this.draw(encoder, p, [cachedView(tex)], resolve, "load", p.spec.vertexCount, p.spec.count);
     }
 
     // ---- strip(2D line/bezier の instanced 描画。ADR-0044、ADR-0016 を差し替え) ----
@@ -362,8 +366,8 @@ export class ProgramSlot {
     if (this.sceneTex) {
       let firstStrip = true;
       for (const p of this.passes) {
-        if (p.spec.kind !== "strip" || p.spec.stripVertexCount === undefined) continue;
-        this.draw(encoder, p, [cachedView(this.sceneTex)], resolve, firstStrip ? "clear" : "load", p.spec.stripVertexCount, p.spec.stripCount ?? 1);
+        if (p.spec.kind !== "strip") continue;
+        this.draw(encoder, p, [cachedView(this.sceneTex)], resolve, firstStrip ? "clear" : "load", p.spec.vertexCount, p.spec.count);
         firstStrip = false;
       }
     }
@@ -373,7 +377,7 @@ export class ProgramSlot {
     // compiled.passes の並び順どおりに実行すればよい
     for (const p of this.passes) {
       if (p.spec.kind !== "bloom-extract" && p.spec.kind !== "bloom-down" && p.spec.kind !== "bloom-up") continue;
-      const tex = this.bloomTex.get(p.spec.bloomOutKey!);
+      const tex = this.bloomTex.get(p.spec.outKey);
       if (!tex) continue;
       this.draw(encoder, p, [cachedView(tex)], resolve);
     }

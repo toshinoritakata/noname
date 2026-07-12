@@ -3,6 +3,7 @@
 // エラー時は直前の正常プログラムが走り続ける(ADR-0010)。
 
 import type { Diagnostic } from "../compiler/diag.ts";
+import { pxOf } from "../compiler/pass-contract.ts";
 import type { Gpu } from "./gpu.ts";
 import { WORK_FORMAT } from "./gpu.ts";
 import { cachedView, PipelineCache, TextTextureCache, viewId } from "./caches.ts";
@@ -164,7 +165,7 @@ export class Renderer {
         case "cps":
           return this.clock.cps;
         case "px":
-          return 2 / Math.max(1, Math.min(this.gpu.canvas.width, this.gpu.canvas.height));
+          return pxOf(this.gpu.canvas.width, this.gpu.canvas.height);
         default:
           if (name.startsWith("text:") && name.endsWith(":aspect")) {
             const key = name.slice(0, -":aspect".length);

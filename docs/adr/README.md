@@ -63,6 +63,7 @@
 - [0044](0044-2d-strips-into-pre-bloom-hdr-scene.md) — 2Dのline/bezierストリップをbloom前のHDR `scene`テクスチャへ焼き込み、場が`scene`をサンプルして合成する(ADR-0016の「最終画像へ直接上描き」を差し替え)。`glow`が`strip2D`を運ぶようになり、2D line/bezierにもglow+bloomの光暈が効く
 - [0045](0045-fill-field-colour-propagates-to-instanced-markers.md) — `fill`に場の色を渡してもsprite/strip3Dの instanced マーカーを引き継ぐ(loopiのみ依存の評価点で場を1回評価。従来は無条件フォールバックで scatter+line/bezier+場の色がコンパイルエラーになっていたバグの修正)
 - [0046](0046-compiler-worker-crash-recovery.md) — コンパイラ Worker のクラッシュ/ハングから復旧する(Worker側はtry/catchで例外を診断化、親側はerror/timeout安全弁+全pending解決+再生成。放置すると`evaluating`フラグが恒久ロックし編集が二度と反映されなくなるバグの修正)
+- [0047](0047-pass-contract-module.md) — compiler↔runtime のパス契約を pass-contract.ts に集約する(CompiledPass の discriminated union 化・kind 別構築子によるハッシュ計算の所有・uniform layout / binding 規約の関数化。ADR-0041 の「新設パスごとに hash 完全性を都度確認」リスクをミューテーションテストで機械化。tex-keys.ts の先例に倣う)
 
 ## 未決(ADR 化待ち)
 

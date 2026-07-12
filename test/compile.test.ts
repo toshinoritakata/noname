@@ -290,7 +290,7 @@ test("scatter された bezier/point/line に場の色を fill しても instanc
        |> fill (ramp [red, blue] (noise 2)))`);
   assert.equal(strip2D.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(strip2D.diagnostics));
   assert.ok(strip2D.program);
-  assert.ok(strip2D.program!.passes.some((p) => p.kind === "strip" && p.stripCount === 40), JSON.stringify(strip2D.program!.passes));
+  assert.ok(strip2D.program!.passes.some((p) => p.kind === "strip" && p.count === 40), JSON.stringify(strip2D.program!.passes));
 
   const sprite = compile(`out (render (orbit 6 0.1) (scatter 100 \\i ->
     point 0.02
@@ -298,14 +298,14 @@ test("scatter された bezier/point/line に場の色を fill しても instanc
     |> fill (ramp [red, blue] (fbm 3))))`);
   assert.equal(sprite.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(sprite.diagnostics));
   assert.ok(sprite.program);
-  assert.ok(sprite.program!.passes.some((p) => p.kind === "sprite" && p.spriteCount === 100), JSON.stringify(sprite.program!.passes));
+  assert.ok(sprite.program!.passes.some((p) => p.kind === "sprite" && p.count === 100), JSON.stringify(sprite.program!.passes));
 
   const strip3D = compile(`out (render (orbit 6 0.1) (scatter 30 \\i ->
     line (onSphere (hash2 i)) (onSphere (hash2 (i + 99))) 0.01
     |> fill (ramp [red, blue] (fbm 3))))`);
   assert.equal(strip3D.diagnostics.filter((d) => d.severity === "error").length, 0, JSON.stringify(strip3D.diagnostics));
   assert.ok(strip3D.program);
-  assert.ok(strip3D.program!.passes.some((p) => p.kind === "strip3d" && p.strip3Count === 30), JSON.stringify(strip3D.program!.passes));
+  assert.ok(strip3D.program!.passes.some((p) => p.kind === "strip3d" && p.count === 30), JSON.stringify(strip3D.program!.passes));
 });
 
 test("大きな scatter は WGSL の for ループになる", () => {

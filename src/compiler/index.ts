@@ -5,7 +5,8 @@ import type { Diagnostic } from "./diag.ts";
 import { parse } from "./parser.ts";
 import { stageProgram } from "./stage.ts";
 import type { GlslFrontend } from "./stdlib.ts";
-import { generateWGSL, type CompiledProgram } from "./wgsl.ts";
+import { generateWGSL } from "./wgsl.ts";
+import type { CompiledProgram } from "./pass-contract.ts";
 import { inferProgram } from "./infer.ts";
 
 export interface CompileResult {

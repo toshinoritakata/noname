@@ -8,7 +8,6 @@ import type { Span } from "./diag.ts";
 import {
   buildVec4Roots,
   childrenOf,
-  fnv1a,
   mapChildren,
   padOffset,
   vecLen,
@@ -22,83 +21,25 @@ import type { StagedProgram } from "./stage.ts";
 import type { BloomPassSpec, RaymarchPassSpec, SimPassSpec, StripBatchSpec } from "./value.ts";
 import { LIB } from "./wgsl-lib.ts";
 import { bloomKeys, texKeyData, texKeyDataOut, texKeySprite, texKeyStrip, texKeyStrip3 } from "./tex-keys.ts";
-
-export interface CompiledPass {
-  kind:
-    | "sim-init"
-    | "sim-update"
-    | "data"
-    | "raymarch"
-    | "sprite"
-    | "strip"
-    | "strip3d"
-    | "image"
-    | "bloom-extract"
-    | "bloom-down"
-    | "bloom-up";
-  code: string;
-  /** MRT のターゲット数 */
-  targets: number;
-  /** group(0) binding 2.. に並ぶテクスチャキー */
-  textures: string[];
-  simName?: string;
-  rmId?: number;
-  /** data パス: 出力テクスチャのキー接頭辞(`${dataKey}:${t}`)と要素数 */
-  dataKey?: string;
-  dataCount?: number;
-  /** raymarch パス: ループ重量級は半解像度で描く */
-  halfRes?: boolean;
-  /** sprite パス: 描画先の raymarch id とインスタンス数(implementation.md 追加、ADR-0014) */
-  spriteRmId?: number;
-  spriteCount?: number;
-  /** strip パス: インスタンス数と頂点数(implementation.md 追加、ADR-0016)。最終画像に直接描く */
-  stripCount?: number;
-  stripVertexCount?: number;
-  /** strip3d パス: 描画先の raymarch id・インスタンス数・頂点数(ADR-0036)。
-   * sprite と同じく深度テストなしでレイマーチ結果に重ね描きする */
-  strip3RmId?: number;
-  strip3Count?: number;
-  strip3VertexCount?: number;
-  /** bloom-*: 対応する BloomPassSpec の id、出力テクスチャキー、解像度の分母(ADR-0019) */
-  bloomId?: number;
-  bloomOutKey?: string;
-  bloomResDivisor?: number;
-  hash: string;
-  /** 生成 WGSL の行番号(1-based)→ 元コードの span */
-  lineSpans: (Span | null)[];
-}
-
-export interface SimRuntimeSpec {
-  name: string;
-  sig: string;
-  kind: "grid" | "array";
-  width: number;
-  height: number;
-  texCount: number;
-}
-
-export interface UniformLayout {
-  /** 入力スロット名(time / etime / audio.lo / lag:... など)。slots 配列の先頭から詰める */
-  inputs: string[];
-  /** リテラルの開始 float オフセット(inputs の直後) */
-  literalBase: number;
-  literalCount: number;
-  /** slots の vec4 数 */
-  slotCount: number;
-}
-
-export interface CompiledProgram {
-  passes: CompiledPass[];
-  uniformLayout: UniformLayout;
-  literals: { value: number; span: Span }[];
-  fade: { value: number; unit: "s" | "beat" } | null;
-  sims: SimRuntimeSpec[];
-  usesPrev: boolean;
-  derivedInputs: { name: string; source: string; kind: "lag"; k: number }[];
-  /** `text`(ADR-0032)がラスタライズを要求する文字列。key ごとに重複なし */
-  textTextures: { key: string; text: string }[];
-  programHash: string;
-}
+import {
+  finalizePassHashes,
+  makeBloomDownPass,
+  makeBloomExtractPass,
+  makeBloomUpPass,
+  makeDataPass,
+  makeImagePass,
+  makeRaymarchPass,
+  makeSimPass,
+  makeSpritePass,
+  makeStrip3dPass,
+  makeStripPass,
+  programHashOf,
+  textureWgslDecls,
+  uniformWgslDecl,
+  type CompiledPass,
+  type CompiledProgram,
+  type UniformLayout,
+} from "./pass-contract.ts";
 
 /**
  * "call" IR ノードの fn 名を WGSL 側が解決できるか(WGSL 組み込み or LIB エントリ)。
@@ -239,7 +180,7 @@ class Codegen {
     }
     const n = this.arena.get(id);
     const name = `n${id}`;
-    const expr = this.exprOf(n, id, scope);
+    const expr = this.exprOf(n, scope);
     if (n.k === "loopi" || n.k === "loopacc") {
       // 予約名(ループ側で定義済み)
       scope.names.set(id, expr);
@@ -250,7 +191,7 @@ class Codegen {
     return name;
   }
 
-  private exprOf(n: IRNode, id: NodeId, scope: EmitScope): string {
+  private exprOf(n: IRNode, scope: EmitScope): string {
     switch (n.k) {
       case "coord":
         return "P";
@@ -307,17 +248,7 @@ class Codegen {
         return `textureLoad(${t}, vec2i(i32(${i}), 0), 0)`;
       }
       case "rmctx":
-        switch (n.which) {
-          case "normal":
-            return "N";
-          case "raydir":
-            return "RD";
-          case "raydist":
-            return "RT";
-          case "hitpos":
-            return "P";
-        }
-        break;
+        return { normal: "N", raydir: "RD", raydist: "RT", hitpos: "P" }[n.which];
       case "loop": {
         // ループはブロックとして展開する。
         // 注意: ループ非依存のノードは本体の中から「親スコープへ巻き上げ」られる
@@ -364,7 +295,6 @@ class Codegen {
         return `${n.name}(${args.join(", ")})`;
       }
     }
-    return "0.0";
   }
 }
 
@@ -587,21 +517,6 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4f {
 }
 `;
 
-function uniformDecl(slotCount: number): string {
-  const n = Math.max(1, slotCount);
-  return `struct Uniforms {
-  header: vec4f,
-  slots: array<vec4f, ${n}>,
-}
-@group(0) @binding(0) var<uniform> U: Uniforms;
-@group(0) @binding(1) var samp: sampler;
-`;
-}
-
-function textureDecls(texKeys: string[]): string {
-  return texKeys.map((_, i) => `@group(0) @binding(${i + 2}) var tex${i}: texture_2d<f32>;`).join("\n");
-}
-
 function assemble(
   cg: Codegen,
   bodyFns: string,
@@ -617,8 +532,8 @@ function assemble(
       ? ""
       : `struct FsOut {\n${Array.from({ length: targets }, (_, i) => `  @location(${i}) c${i}: vec4f,`).join("\n")}\n}\n`;
   return [
-    uniformDecl(cg.layout.slotCount),
-    textureDecls(cg.usedTex),
+    uniformWgslDecl(cg.layout.slotCount),
+    textureWgslDecls(cg.usedTex),
     libSrc.replaceAll("UH.", "U.header."),
     ffiSrcs.join("\n"),
     bodyFns,
@@ -673,15 +588,19 @@ ${scope.lines.join("\n")}
   ${retExpr}
 }`;
       const code = assemble(cg, "", fs, targets, ffiSrcs);
-      passes.push({
-        kind: phase === "init" ? "sim-init" : "sim-update",
-        code,
-        targets,
-        textures: cg.usedTex,
-        simName: sim.handle.name,
-        hash: fnv1a(sim.handle.sig + ":" + phase + ":" + arena.structuralHash(roots) + ":" + inputs.join(",")),
-        lineSpans: [],
-      });
+      passes.push(
+        makeSimPass({
+          kind: phase === "init" ? "sim-init" : "sim-update",
+          code,
+          targets,
+          textures: cg.usedTex,
+          lineSpans: [],
+          simName: sim.handle.name,
+          sig: sim.handle.sig,
+          structuralHash: arena.structuralHash(roots),
+          inputs,
+        }),
+      );
     }
   }
   return passes;
@@ -708,16 +627,19 @@ ${scope.lines.join("\n")}
   ${retExpr}
 }`;
     const code = assemble(cg, "", fs, dp.texCount, ffiSrcs);
-    passes.push({
-      kind: "data",
-      code,
-      targets: dp.texCount,
-      textures: cg.usedTex,
-      dataKey: texKeyData(dp.loopId),
-      dataCount: dp.count,
-      hash: fnv1a("data:" + arena.structuralHash(dp.roots) + ":" + inputs.join(",")),
-      lineSpans: [],
-    });
+    passes.push(
+      makeDataPass({
+        code,
+        targets: dp.texCount,
+        textures: cg.usedTex,
+        lineSpans: [],
+        dataKey: texKeyData(dp.loopId),
+        dataCount: dp.count,
+        label: "data",
+        structuralHash: arena.structuralHash(dp.roots),
+        inputs,
+      }),
+    );
   }
   return passes;
 }
@@ -786,16 +708,18 @@ ${camScope.lines.join("\n")}
   return rmCol(hp, n, rd, t);
 }`;
     const code = assemble(cg, bodyFns, fs, 1, ffiSrcs);
-    passes.push({
-      kind: "raymarch",
-      code,
-      targets: 1,
-      textures: cg.usedTex,
-      rmId: rm.id,
-      halfRes: heavy,
-      hash: fnv1a("rm:" + arena.structuralHash([rm.dist, rm.colour, rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
-      lineSpans: [],
-    });
+    passes.push(
+      makeRaymarchPass({
+        code,
+        targets: 1,
+        textures: cg.usedTex,
+        lineSpans: [],
+        rmId: rm.id,
+        halfRes: heavy,
+        structuralHash: arena.structuralHash([rm.dist, rm.colour, rm.eye, rm.target, rm.fov]),
+        inputs,
+      }),
+    );
 
     // ---- Sprite パス(scatter の点状パーティクルの instanced 描画。ADR-0014) ----
     // CSG ループの代わりに「フレームに1回、N テクセルの位置/色データパス」+
@@ -826,16 +750,19 @@ ${scope.lines.join("\n")}
   return o;
 }`;
         const code2 = assemble(cg2, "", fs2, 2, ffiSrcs);
-        passes.push({
-          kind: "data",
-          code: code2,
-          targets: 2,
-          textures: cg2.usedTex,
-          dataKey,
-          dataCount: batch.count,
-          hash: fnv1a("sprite-data:" + batch.count + ":" + arena.structuralHash([batch.centerRadiusIR, batch.colourIR]) + ":" + inputs.join(",")),
-          lineSpans: [],
-        });
+        passes.push(
+          makeDataPass({
+            code: code2,
+            targets: 2,
+            textures: cg2.usedTex,
+            lineSpans: [],
+            dataKey,
+            dataCount: batch.count,
+            label: "sprite-data",
+            structuralHash: arena.structuralHash([batch.centerRadiusIR, batch.colourIR]),
+            inputs,
+          }),
+        );
       }
       {
         const cg3 = new Codegen(arena, layout, inputIndex);
@@ -895,16 +822,19 @@ fn fs_main(in: SpriteVOut) -> @location(0) vec4f {
   return vec4f(in.col.rgb * a, a);
 }`;
         const code3 = assemble(cg3, "", fs3, 1, ffiSrcs, vs);
-        passes.push({
-          kind: "sprite",
-          code: code3,
-          targets: 1,
-          textures: cg3.usedTex,
-          spriteRmId: rm.id,
-          spriteCount: batch.count,
-          hash: fnv1a("sprite:" + batch.loopId + ":" + batch.count + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
-          lineSpans: [],
-        });
+        passes.push(
+          makeSpritePass({
+            code: code3,
+            targets: 1,
+            textures: cg3.usedTex,
+            lineSpans: [],
+            rmId: rm.id,
+            count: batch.count,
+            loopId: batch.loopId,
+            structuralHash: arena.structuralHash([rm.eye, rm.target, rm.fov]),
+            inputs,
+          }),
+        );
       }
     }
 
@@ -948,18 +878,19 @@ ${scope.lines.join("\n")}
   return o;
 }`;
         const code2 = assemble(cg2, "", fs2, 4, ffiSrcs);
-        passes.push({
-          kind: "data",
-          code: code2,
-          targets: 4,
-          textures: cg2.usedTex,
-          dataKey,
-          dataCount: batch.count,
-          hash: fnv1a(
-            "strip3-data:" + batch.count + ":" + arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]) + ":" + inputs.join(","),
-          ),
-          lineSpans: [],
-        });
+        passes.push(
+          makeDataPass({
+            code: code2,
+            targets: 4,
+            textures: cg2.usedTex,
+            lineSpans: [],
+            dataKey,
+            dataCount: batch.count,
+            label: "strip3-data",
+            structuralHash: arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]),
+            inputs,
+          }),
+        );
       }
       {
         const cg3 = new Codegen(arena, layout, inputIndex);
@@ -1034,17 +965,21 @@ fn fs_main(in: Strip3VOut) -> @location(0) vec4f {
   return vec4f(in.col.rgb * cov, cov);
 }`;
         const code3 = assemble(cg3, "", fs3, 1, ffiSrcs, vs);
-        passes.push({
-          kind: "strip3d",
-          code: code3,
-          targets: 1,
-          textures: cg3.usedTex,
-          strip3RmId: rm.id,
-          strip3Count: batch.count,
-          strip3VertexCount: 2 * (segs + 1),
-          hash: fnv1a("strip3:" + batch.loopId + ":" + batch.count + ":" + segs + ":" + arena.structuralHash([rm.eye, rm.target, rm.fov]) + ":" + inputs.join(",")),
-          lineSpans: [],
-        });
+        passes.push(
+          makeStrip3dPass({
+            code: code3,
+            targets: 1,
+            textures: cg3.usedTex,
+            lineSpans: [],
+            rmId: rm.id,
+            count: batch.count,
+            vertexCount: 2 * (segs + 1),
+            loopId: batch.loopId,
+            segs,
+            structuralHash: arena.structuralHash([rm.eye, rm.target, rm.fov]),
+            inputs,
+          }),
+        );
       }
     }
   }
@@ -1105,17 +1040,19 @@ ${scope.lines.join("\n")}
   return ${out};
 }`;
       const code = assemble(cg, "", fs, 1, ffiSrcs);
-      passes.push({
-        kind: "bloom-extract",
-        code,
-        targets: 1,
-        textures: cg.usedTex,
-        bloomId: b.id,
-        bloomOutKey: nativeKey,
-        bloomResDivisor: 1,
-        hash: fnv1a("bloom-n:" + b.id + ":" + arena.structuralHash([b.extract]) + ":" + inputs.join(",")),
-        lineSpans: [],
-      });
+      passes.push(
+        makeBloomExtractPass({
+          code,
+          targets: 1,
+          textures: cg.usedTex,
+          lineSpans: [],
+          bloomId: b.id,
+          outKey: nativeKey,
+          resDivisor: 1,
+          structuralHash: arena.structuralHash([b.extract]),
+          inputs,
+        }),
+      );
     }
 
     // downsample: 固定のボックスフィルタ(4タップ)。src は自分の2倍の解像度
@@ -1137,17 +1074,19 @@ fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   return (c0 + c1 + c2 + c3) * 0.25;
 }`;
       const code = assemble(cg, "", fs, 1, []);
-      passes.push({
-        kind: "bloom-down",
-        code,
-        targets: 1,
-        textures: cg.usedTex,
-        bloomId: b.id,
-        bloomOutKey: dstKey,
-        bloomResDivisor: dstDivisor,
-        hash: fnv1a("bloom-d:" + b.id + ":" + srcKey + ":" + dstKey),
-        lineSpans: [],
-      });
+      passes.push(
+        makeBloomDownPass({
+          code,
+          targets: 1,
+          textures: cg.usedTex,
+          lineSpans: [],
+          bloomId: b.id,
+          outKey: dstKey,
+          resDivisor: dstDivisor,
+          srcKey,
+          dstKey,
+        }),
+      );
     };
     // ダウンサンプル連鎖: native(1/1) → e(1/2) → d1(1/4) → d2(1/8) → ... → dN(1/2^(N+1))
     downsample(nativeKey, eKey, 2);
@@ -1184,17 +1123,20 @@ fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   return up + skip;
 }`;
       const code = assemble(cg, "", fs, 1, []);
-      passes.push({
-        kind: "bloom-up",
-        code,
-        targets: 1,
-        textures: cg.usedTex,
-        bloomId: b.id,
-        bloomOutKey: dstKey,
-        bloomResDivisor: dstDivisor,
-        hash: fnv1a("bloom-u:" + b.id + ":" + smallKey + ":" + skipKey + ":" + dstKey),
-        lineSpans: [],
-      });
+      passes.push(
+        makeBloomUpPass({
+          code,
+          targets: 1,
+          textures: cg.usedTex,
+          lineSpans: [],
+          bloomId: b.id,
+          outKey: dstKey,
+          resDivisor: dstDivisor,
+          smallKey,
+          skipKey,
+          dstKey,
+        }),
+      );
     };
     // アップサンプル連鎖: dN とその1つ上のスキップ接続から始めて、e とのスキップ接続で
     // 終わる(u0 = FINAL、image パスがサンプルする)
@@ -1227,14 +1169,14 @@ ${scope.lines.join("\n")}
   return vec4f(mapped * c.a, c.a);
 }`;
   const code = assemble(cg, "", fs, 1, ffiSrcs);
-  return {
-    kind: "image",
+  return makeImagePass({
     code,
     targets: 1,
     textures: cg.usedTex,
-    hash: fnv1a("img:" + arena.structuralHash([imageRoot]) + ":" + inputs.join(",")),
     lineSpans: [],
-  };
+    structuralHash: arena.structuralHash([imageRoot]),
+    inputs,
+  });
 }
 
 // ---- Strip パス(2D line/bezier の instanced 描画。ADR-0016・ADR-0044) ----
@@ -1277,16 +1219,19 @@ ${scope.lines.join("\n")}
   return o;
 }`;
       const code2 = assemble(cg2, "", fs2, 3, ffiSrcs);
-      passes.push({
-        kind: "data",
-        code: code2,
-        targets: 3,
-        textures: cg2.usedTex,
-        dataKey,
-        dataCount: batch.count,
-        hash: fnv1a("strip-data:" + batch.count + ":" + arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]) + ":" + inputs.join(",")),
-        lineSpans: [],
-      });
+      passes.push(
+        makeDataPass({
+          code: code2,
+          targets: 3,
+          textures: cg2.usedTex,
+          lineSpans: [],
+          dataKey,
+          dataCount: batch.count,
+          label: "strip-data",
+          structuralHash: arena.structuralHash([batch.p0IR, batch.p1IR, batch.p2IR, batch.widthIR, batch.colourIR]),
+          inputs,
+        }),
+      );
     }
     {
       const cg3 = new Codegen(arena, layout, inputIndex);
@@ -1333,16 +1278,19 @@ fn fs_main(in: StripVOut) -> @location(0) vec4f {
   return vec4f(in.col.rgb * cov, cov);
 }`;
       const code3 = assemble(cg3, "", fs3, 1, ffiSrcs, vs);
-      passes.push({
-        kind: "strip",
-        code: code3,
-        targets: 1,
-        textures: cg3.usedTex,
-        stripCount: batch.count,
-        stripVertexCount: 2 * (segs + 1),
-        hash: fnv1a("strip:" + batch.loopId + ":" + batch.count + ":" + segs + ":" + inputs.join(",")),
-        lineSpans: [],
-      });
+      passes.push(
+        makeStripPass({
+          code: code3,
+          targets: 1,
+          textures: cg3.usedTex,
+          lineSpans: [],
+          count: batch.count,
+          vertexCount: 2 * (segs + 1),
+          loopId: batch.loopId,
+          segs,
+          inputs,
+        }),
+      );
     }
   }
   return passes;
@@ -1401,12 +1349,8 @@ export function generateWGSL(staged: StagedProgram): CompiledProgram {
     ...emitStripPasses(ectx, staged.stripBatches),
   ];
 
-  // パイプラインの誤共有を防ぐため、uniform スロット数とテクスチャ構成もハッシュに含める
-  // (シェーダ本文の array<vec4f, N> とバインディング数がキャッシュキーに効く)
-  for (const p of passes) {
-    p.hash = fnv1a(`${p.hash}:${slotCount}:${p.textures.join(",")}`);
-  }
-  const programHash = fnv1a(passes.map((p) => p.hash).join("|") + "|prev:" + staged.usesPrev);
+  finalizePassHashes(passes, slotCount);
+  const programHash = programHashOf(passes, staged.usesPrev);
 
   return {
     passes,
